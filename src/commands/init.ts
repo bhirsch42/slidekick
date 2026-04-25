@@ -82,7 +82,7 @@ function starterPackageJson(name: string): string {
     "build": "slidekick build"
   },
   "dependencies": {
-    "slidekick": "*"
+    "slidekick": "github:bhirsch42/slidekick"
   }
 }
 `;

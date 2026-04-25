@@ -29,7 +29,8 @@
     "build": "bun run scripts/build.ts",
     "dev": "bun run --watch src/cli.ts",
     "slidekick": "bun run src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "bun run build"
   },
   "dependencies": {
     "commander": "^12.1.0",
