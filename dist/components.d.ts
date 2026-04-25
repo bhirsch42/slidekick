@@ -1,0 +1,12 @@
+import type { Node, SlideProps, ColumnsProps, ColumnProps, TitleProps, SubtitleProps, HeadingProps, BulletsProps, BulletProps, TextProps, ImageProps, QuoteProps } from "./types.js";
+export declare const Slide: (props: SlideProps) => Node;
+export declare const Columns: (props: ColumnsProps) => Node;
+export declare const Column: (props: ColumnProps) => Node;
+export declare const Title: (props: TitleProps) => Node;
+export declare const Subtitle: (props: SubtitleProps) => Node;
+export declare const Heading: (props: HeadingProps) => Node;
+export declare const Bullets: (props: BulletsProps) => Node;
+export declare const Bullet: (props: BulletProps) => Node;
+export declare const Text: (props: TextProps) => Node;
+export declare const Image: (props: ImageProps) => Node;
+export declare const Quote: (props: QuoteProps) => Node;
