@@ -11,15 +11,16 @@ Early. Layouts are intentionally minimal. The component vocabulary is small on p
 ## Quickstart
 
 ```sh
-bunx github:bhirsch42/slidekick init my-deck
+bun add -g github:bhirsch42/slidekick   # global CLI
+slidekick init my-deck                   # scaffold a deck project
 cd my-deck
-bun install
-bun slidekick dev      # live HTML preview, hot-reloads on save
-bun slidekick build    # writes out/deck.pptx
-bun slidekick agent    # prints AI authoring instructions
+bun install                              # pulls slidekick from GitHub
+bun slidekick dev                        # live HTML preview, hot-reloads on save
+bun slidekick build                      # writes out/deck.pptx
+bun slidekick agent                      # prints AI authoring instructions
 ```
 
-slidekick installs from GitHub directly — no npm publish yet. The package's `prepare` script builds `dist/` automatically on install.
+slidekick installs straight from GitHub — no npm publish yet. The CLI bundle is committed so installs work without a build step.
 
 ## A deck looks like this
 
