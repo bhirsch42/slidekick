@@ -31,6 +31,9 @@
     "slidekick": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/",
+    "format": "biome format --write",
+    "lint": "biome lint",
+    "check": "biome check --write",
     "prepare": "bun run build"
   },
   "dependencies": {
@@ -38,6 +41,7 @@
     "googleapis": "^144.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.14",
     "@types/bun": "^1.1.13",
     "typescript": "^5.6.0"
   },
