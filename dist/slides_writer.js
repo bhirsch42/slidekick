@@ -36,6 +36,9 @@ export function deckToRequests(input, opts = {}) {
         const bg = slideLayout.background ?? theme.background;
         if (bg !== undefined)
             emitPageBackground(requests, slideId, bg);
+        if (typeof bg === "object" && bg !== null && bg.scrim !== undefined) {
+            emitScrim(requests, slideId, slideIdx, bg.scrim, page);
+        }
         slideLayout.placed.forEach((p, i) => {
             const elementId = `sk_e_${slideIdx}_${i}`;
             const x = p.x * sx;
@@ -233,6 +236,44 @@ function pushTextStyle(out, objectId, style, startIndex, endIndex) {
             style: textStyle,
             fields: fields.join(","),
             textRange: { type: "FIXED_RANGE", startIndex, endIndex },
+        },
+    });
+}
+function emitScrim(out, slideId, slideIdx, scrim, page) {
+    const objectId = `sk_scrim_${slideIdx}`;
+    let rgb = null;
+    let alpha = 1;
+    if (typeof scrim === "number") {
+        rgb = { red: 0, green: 0, blue: 0 };
+        alpha = Math.max(0, Math.min(1, scrim));
+    }
+    else {
+        rgb = parseColor(scrim);
+    }
+    if (!rgb)
+        return;
+    out.push({
+        createShape: {
+            objectId,
+            shapeType: "RECTANGLE",
+            elementProperties: {
+                pageObjectId: slideId,
+                size: {
+                    width: { magnitude: page.widthPt, unit: "PT" },
+                    height: { magnitude: page.heightPt, unit: "PT" },
+                },
+                transform: { scaleX: 1, scaleY: 1, translateX: 0, translateY: 0, unit: "PT" },
+            },
+        },
+    });
+    out.push({
+        updateShapeProperties: {
+            objectId,
+            shapeProperties: {
+                shapeBackgroundFill: { solidFill: { color: { rgbColor: rgb }, alpha } },
+                outline: { propertyState: "NOT_RENDERED" },
+            },
+            fields: "shapeBackgroundFill.solidFill,outline.propertyState",
         },
     });
 }

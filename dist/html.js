@@ -26,11 +26,12 @@ export function renderHtml(input) {
         const maxStep = slideLayout.placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
         const bg = slideLayout.background ?? theme.background;
         const bgStyle = bgToCss(bg);
+        const scrim = scrimDiv(bg);
         const themeText = theme.text ? `color:${escapeAttr(theme.text)};` : "";
         const themeFont = theme.fonts?.body
             ? `font-family:${escapeAttr(theme.fonts.body)};`
             : "";
-        return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${items}<div class="step-badge"></div></section>`;
+        return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}<div class="step-badge"></div></section>`;
     })
         .join("\n");
     return `<!doctype html>
@@ -56,6 +57,7 @@ export function renderHtml(input) {
     background-position: center;
   }
   .slide.focused { outline-color: #4a9eff; }
+  .scrim { position: absolute; inset: 0; pointer-events: none; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
   .role-subtitle { font-size: 22px; justify-content: center; }
@@ -145,6 +147,14 @@ function bgToCss(bg) {
     if (typeof bg === "string")
         return `background-color:${escapeAttr(bg)};`;
     return `background-image:url(${JSON.stringify(bg.image)});`;
+}
+function scrimDiv(bg) {
+    if (typeof bg !== "object" || bg === null || bg.scrim === undefined)
+        return "";
+    const color = typeof bg.scrim === "number"
+        ? `rgba(0,0,0,${Math.max(0, Math.min(1, bg.scrim))})`
+        : bg.scrim;
+    return `<div class="scrim" style="background:${escapeAttr(color)};"></div>`;
 }
 function maxStepOf(p) {
     if (p.kind === "bullets") {

@@ -2235,9 +2235,10 @@ function renderHtml(input) {
     const maxStep = slideLayout.placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
     const bg = slideLayout.background ?? theme.background;
     const bgStyle = bgToCss(bg);
+    const scrim = scrimDiv(bg);
     const themeText = theme.text ? `color:${escapeAttr(theme.text)};` : "";
     const themeFont = theme.fonts?.body ? `font-family:${escapeAttr(theme.fonts.body)};` : "";
-    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${items}<div class="step-badge"></div></section>`;
+    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}<div class="step-badge"></div></section>`;
   }).join(`
 `);
   return `<!doctype html>
@@ -2263,6 +2264,7 @@ function renderHtml(input) {
     background-position: center;
   }
   .slide.focused { outline-color: #4a9eff; }
+  .scrim { position: absolute; inset: 0; pointer-events: none; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
   .role-subtitle { font-size: 22px; justify-content: center; }
@@ -2352,6 +2354,12 @@ function bgToCss(bg) {
   if (typeof bg === "string")
     return `background-color:${escapeAttr(bg)};`;
   return `background-image:url(${JSON.stringify(bg.image)});`;
+}
+function scrimDiv(bg) {
+  if (typeof bg !== "object" || bg === null || bg.scrim === undefined)
+    return "";
+  const color = typeof bg.scrim === "number" ? `rgba(0,0,0,${Math.max(0, Math.min(1, bg.scrim))})` : bg.scrim;
+  return `<div class="scrim" style="background:${escapeAttr(color)};"></div>`;
 }
 function maxStepOf(p) {
   if (p.kind === "bullets") {
@@ -2956,6 +2964,9 @@ function deckToRequests(input, opts = {}) {
     const bg = slideLayout.background ?? theme.background;
     if (bg !== undefined)
       emitPageBackground(requests, slideId, bg);
+    if (typeof bg === "object" && bg !== null && bg.scrim !== undefined) {
+      emitScrim(requests, slideId, slideIdx, bg.scrim, page);
+    }
     slideLayout.placed.forEach((p, i) => {
       const elementId = `sk_e_${slideIdx}_${i}`;
       const x = p.x * sx;
@@ -3151,6 +3162,43 @@ function pushTextStyle(out, objectId, style, startIndex, endIndex) {
       style: textStyle,
       fields: fields.join(","),
       textRange: { type: "FIXED_RANGE", startIndex, endIndex }
+    }
+  });
+}
+function emitScrim(out, slideId, slideIdx, scrim, page) {
+  const objectId = `sk_scrim_${slideIdx}`;
+  let rgb = null;
+  let alpha = 1;
+  if (typeof scrim === "number") {
+    rgb = { red: 0, green: 0, blue: 0 };
+    alpha = Math.max(0, Math.min(1, scrim));
+  } else {
+    rgb = parseColor(scrim);
+  }
+  if (!rgb)
+    return;
+  out.push({
+    createShape: {
+      objectId,
+      shapeType: "RECTANGLE",
+      elementProperties: {
+        pageObjectId: slideId,
+        size: {
+          width: { magnitude: page.widthPt, unit: "PT" },
+          height: { magnitude: page.heightPt, unit: "PT" }
+        },
+        transform: { scaleX: 1, scaleY: 1, translateX: 0, translateY: 0, unit: "PT" }
+      }
+    }
+  });
+  out.push({
+    updateShapeProperties: {
+      objectId,
+      shapeProperties: {
+        shapeBackgroundFill: { solidFill: { color: { rgbColor: rgb }, alpha } },
+        outline: { propertyState: "NOT_RENDERED" }
+      },
+      fields: "shapeBackgroundFill.solidFill,outline.propertyState"
     }
   });
 }

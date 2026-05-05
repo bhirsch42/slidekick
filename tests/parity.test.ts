@@ -15,12 +15,18 @@ import type { DeckModule, Theme } from "../src/types.js";
 
 describe("theme defaults", () => {
   test("themeless: existing decks render unchanged (no pageBackgroundFill)", () => {
-    const reqs = deckToRequests([Slide({ children: [Title({ children: "Hi" })] })]);
+    const reqs = deckToRequests([
+      Slide({ children: [Title({ children: "Hi" })] }),
+    ]);
     expect(reqs.some((r) => r.updatePageProperties)).toBe(false);
   });
 
   test("theme.background applies to every slide via updatePageProperties", () => {
-    const theme: Theme = { background: "#111111", text: "#ffffff", fonts: { body: "Times New Roman" } };
+    const theme: Theme = {
+      background: "#111111",
+      text: "#ffffff",
+      fonts: { body: "Times New Roman" },
+    };
     const deck: DeckModule = {
       theme,
       slides: [
@@ -31,12 +37,16 @@ describe("theme defaults", () => {
     const reqs = deckToRequests(deck);
     const bgUpdates = reqs.filter((r) => r.updatePageProperties);
     expect(bgUpdates).toHaveLength(2);
-    const fill = bgUpdates[0]!.updatePageProperties!.pageProperties!.pageBackgroundFill;
+    const fill =
+      bgUpdates[0]!.updatePageProperties!.pageProperties!.pageBackgroundFill;
     expect(fill?.solidFill?.color?.rgbColor).toBeTruthy();
   });
 
   test("theme.text and theme.fonts.body show up in updateTextStyle", () => {
-    const theme: Theme = { text: "#ffffff", fonts: { body: "Times New Roman" } };
+    const theme: Theme = {
+      text: "#ffffff",
+      fonts: { body: "Times New Roman" },
+    };
     const deck: DeckModule = {
       theme,
       slides: [Slide({ children: [Title({ children: "A" })] })],
@@ -54,24 +64,27 @@ describe("slide background", () => {
       Slide({ background: "#000", children: [Title({ children: "x" })] }),
     ]);
     const upd = reqs.find((r) => r.updatePageProperties)!;
-    expect(upd.updatePageProperties!.pageProperties!.pageBackgroundFill!.solidFill).toBeTruthy();
+    expect(
+      upd.updatePageProperties!.pageProperties!.pageBackgroundFill!.solidFill,
+    ).toBeTruthy();
   });
 
   test("image background emits stretchedPictureFill", () => {
     const reqs = deckToRequests([
-      Slide({ background: { image: "https://example.com/a.jpg" }, children: [] }),
+      Slide({
+        background: { image: "https://example.com/a.jpg" },
+        children: [],
+      }),
     ]);
     const upd = reqs.find((r) => r.updatePageProperties)!;
     expect(
-      upd.updatePageProperties!.pageProperties!.pageBackgroundFill!.stretchedPictureFill
-        ?.contentUrl,
+      upd.updatePageProperties!.pageProperties!.pageBackgroundFill!
+        .stretchedPictureFill?.contentUrl,
     ).toBe("https://example.com/a.jpg");
   });
 
   test("Slide with no children and a background creates no shapes", () => {
-    const reqs = deckToRequests([
-      Slide({ background: "#111", children: [] }),
-    ]);
+    const reqs = deckToRequests([Slide({ background: "#111", children: [] })]);
     expect(reqs.some((r) => r.createShape)).toBe(false);
   });
 
@@ -91,7 +104,13 @@ describe("inline rich text", () => {
       children: [
         "Christopher Hitchens",
         "\n",
-        Cite({ children: ["British American Journalist", "\n", "Born April 13th, 1949"] }),
+        Cite({
+          children: [
+            "British American Journalist",
+            "\n",
+            "Born April 13th, 1949",
+          ],
+        }),
       ],
     });
     expect(node.runs.length).toBeGreaterThan(1);
@@ -121,7 +140,9 @@ describe("inline rich text", () => {
     const inserts = reqs.filter((r) => r.insertText);
     expect(inserts[0]!.insertText!.text).toBe("Name\ncredit");
     const styled = reqs.filter((r) => r.updateTextStyle);
-    const fixedRange = styled.filter((r) => r.updateTextStyle?.textRange?.type === "FIXED_RANGE");
+    const fixedRange = styled.filter(
+      (r) => r.updateTextStyle?.textRange?.type === "FIXED_RANGE",
+    );
     expect(fixedRange.length).toBeGreaterThanOrEqual(2);
     const citeRange = fixedRange.find((r) => {
       const tr = r.updateTextStyle!.textRange!;
@@ -130,12 +151,16 @@ describe("inline rich text", () => {
     expect(citeRange).toBeTruthy();
     const baseSubtitle = 22;
     const expectedCite = baseSubtitle * 0.75;
-    expect(citeRange!.updateTextStyle!.style!.fontSize!.magnitude).toBeCloseTo(expectedCite);
+    expect(citeRange!.updateTextStyle!.style!.fontSize!.magnitude).toBeCloseTo(
+      expectedCite,
+    );
     expect(citeRange!.updateTextStyle!.style!.foregroundColor).toBeTruthy();
   });
 
   test("themed Bullet with inline Em produces italic run", () => {
-    const node = Bullet({ children: ["plain ", Em({ children: "italic" }), " end"] });
+    const node = Bullet({
+      children: ["plain ", Em({ children: "italic" }), " end"],
+    });
     expect(node.runs).toHaveLength(3);
     expect(node.runs[1]!.style?.italic).toBe(true);
     expect(node.runs.map((r) => r.text).join("")).toBe("plain italic end");
@@ -157,7 +182,9 @@ describe("inline rich text", () => {
     const fixedRanges = reqs.filter(
       (r) => r.updateTextStyle?.textRange?.type === "FIXED_RANGE",
     );
-    const italicRange = fixedRanges.find((r) => r.updateTextStyle?.style?.italic === true);
+    const italicRange = fixedRanges.find(
+      (r) => r.updateTextStyle?.style?.italic === true,
+    );
     expect(italicRange).toBeTruthy();
   });
 });
@@ -168,7 +195,9 @@ describe("Span with explicit overrides", () => {
       slides: [
         Slide({
           children: [
-            Title({ children: ["A ", Span({ children: "red", color: "#ff0000" })] }),
+            Title({
+              children: ["A ", Span({ children: "red", color: "#ff0000" })],
+            }),
           ],
         }),
       ],
@@ -212,6 +241,55 @@ describe("slide align", () => {
   });
 });
 
+describe("scrim", () => {
+  test("image background with numeric scrim emits a full-page rectangle", () => {
+    const reqs = deckToRequests([
+      Slide({
+        background: { image: "https://x/y.jpg", scrim: 0.4 },
+        children: [Title({ children: "T" })],
+      }),
+    ]);
+    const rect = reqs.find((r) => r.createShape?.shapeType === "RECTANGLE");
+    expect(rect).toBeTruthy();
+    const fill = reqs.find(
+      (r) =>
+        r.updateShapeProperties?.shapeProperties?.shapeBackgroundFill
+          ?.solidFill !== undefined,
+    );
+    const sf =
+      fill!.updateShapeProperties!.shapeProperties!.shapeBackgroundFill!
+        .solidFill!;
+    expect(sf.alpha).toBeCloseTo(0.4);
+    expect(sf.color?.rgbColor).toEqual({ red: 0, green: 0, blue: 0 });
+  });
+
+  test("solid color background does not emit a scrim rect", () => {
+    const reqs = deckToRequests([
+      Slide({ background: "#111", children: [Title({ children: "T" })] }),
+    ]);
+    expect(reqs.some((r) => r.createShape?.shapeType === "RECTANGLE")).toBe(
+      false,
+    );
+  });
+
+  test("scrim shape is created before the content text shape", () => {
+    const reqs = deckToRequests([
+      Slide({
+        background: { image: "https://x/y.jpg", scrim: 0.5 },
+        children: [Title({ children: "T" })],
+      }),
+    ]);
+    const rectIdx = reqs.findIndex(
+      (r) => r.createShape?.shapeType === "RECTANGLE",
+    );
+    const textIdx = reqs.findIndex(
+      (r) => r.createShape?.shapeType === "TEXT_BOX",
+    );
+    expect(rectIdx).toBeGreaterThan(-1);
+    expect(textIdx).toBeGreaterThan(rectIdx);
+  });
+});
+
 describe("paragraph alignment", () => {
   test("Subtitle align=center emits updateParagraphStyle CENTER", () => {
     const reqs = deckToRequests([
@@ -226,7 +304,9 @@ describe("paragraph alignment", () => {
 
 describe("user-defined components and fragments", () => {
   test("a function returning multiple slides flattens into the deck", () => {
-    function Section(props: { title: string }): import("../src/types.js").SlideNode[] {
+    function Section(props: {
+      title: string;
+    }): import("../src/types.js").SlideNode[] {
       return [
         Slide({ children: [Title({ children: props.title })] }),
         Slide({ children: [Subtitle({ children: "follow-up" })] }),
@@ -248,7 +328,11 @@ describe("user-defined components and fragments", () => {
       ],
     });
     expect(slide.children).toHaveLength(3);
-    expect(slide.children.map((c) => c.kind)).toEqual(["title", "subtitle", "subtitle"]);
+    expect(slide.children.map((c) => c.kind)).toEqual([
+      "title",
+      "subtitle",
+      "subtitle",
+    ]);
   });
 
   test("falsy children (null, undefined, false) are dropped", () => {
@@ -289,6 +373,8 @@ describe("image fit and crop", () => {
     ]);
     const upd = reqs.find((r) => r.updateImageProperties);
     expect(upd).toBeTruthy();
-    expect(upd!.updateImageProperties!.imageProperties!.cropProperties!.leftOffset).toBeCloseTo(0.1);
+    expect(
+      upd!.updateImageProperties!.imageProperties!.cropProperties!.leftOffset,
+    ).toBeCloseTo(0.1);
   });
 });

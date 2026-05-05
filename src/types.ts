@@ -45,7 +45,7 @@ export interface Theme {
   sizes?: Partial<Record<TextRole, number>>;
 }
 
-export type Background = Color | { image: string };
+export type Background = Color | { image: string; scrim?: number | Color };
 
 export type SlideAlign = "start" | "center" | "end";
 

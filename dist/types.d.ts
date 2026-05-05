@@ -37,6 +37,7 @@ export interface Theme {
 }
 export type Background = Color | {
     image: string;
+    scrim?: number | Color;
 };
 export type SlideAlign = "start" | "center" | "end";
 export interface SlideNode extends Stepped {

@@ -1,5 +1,11 @@
 import type { slides_v1 } from "googleapis";
-import { layoutDeck, type Placed, SLIDE_H, SLIDE_W, type SlideLayout } from "./layout.js";
+import {
+  layoutDeck,
+  type Placed,
+  SLIDE_H,
+  SLIDE_W,
+  type SlideLayout,
+} from "./layout.js";
 import type {
   Background,
   Color,
@@ -10,8 +16,8 @@ import type {
   Run,
   RunStyle,
   SizeToken,
-  Theme,
   TextRole,
+  Theme,
 } from "./types.js";
 
 type Request = slides_v1.Schema$Request;
@@ -21,7 +27,10 @@ export interface PageDims {
   heightPt: number;
 }
 
-export const DEFAULT_PAGE: PageDims = { widthPt: SLIDE_W * 72, heightPt: SLIDE_H * 72 };
+export const DEFAULT_PAGE: PageDims = {
+  widthPt: SLIDE_W * 72,
+  heightPt: SLIDE_H * 72,
+};
 
 export interface WriterOptions {
   page?: PageDims;
@@ -54,7 +63,10 @@ function normalizeDeck(input: DeckInput): { theme: Theme; slides: Deck } {
   return { theme: input.theme ?? {}, slides: input.slides };
 }
 
-export function deckToRequests(input: DeckInput, opts: WriterOptions = {}): Request[] {
+export function deckToRequests(
+  input: DeckInput,
+  opts: WriterOptions = {},
+): Request[] {
   const { theme, slides } = normalizeDeck(input);
   const page = opts.page ?? DEFAULT_PAGE;
   const sx = page.widthPt / SLIDE_W;
@@ -74,6 +86,9 @@ export function deckToRequests(input: DeckInput, opts: WriterOptions = {}): Requ
 
     const bg = slideLayout.background ?? theme.background;
     if (bg !== undefined) emitPageBackground(requests, slideId, bg);
+    if (typeof bg === "object" && bg !== null && bg.scrim !== undefined) {
+      emitScrim(requests, slideId, slideIdx, bg.scrim, page);
+    }
 
     slideLayout.placed.forEach((p, i) => {
       const elementId = `sk_e_${slideIdx}_${i}`;
@@ -88,7 +103,11 @@ export function deckToRequests(input: DeckInput, opts: WriterOptions = {}): Requ
   return requests;
 }
 
-function emitPageBackground(out: Request[], slideId: string, bg: Background): void {
+function emitPageBackground(
+  out: Request[],
+  slideId: string,
+  bg: Background,
+): void {
   if (typeof bg === "string") {
     const color = parseColor(bg);
     if (!color) return;
@@ -100,7 +119,8 @@ function emitPageBackground(out: Request[], slideId: string, bg: Background): vo
             solidFill: { color: { rgbColor: color }, alpha: 1 },
           },
         },
-        fields: "pageBackgroundFill.solidFill.color,pageBackgroundFill.solidFill.alpha",
+        fields:
+          "pageBackgroundFill.solidFill.color,pageBackgroundFill.solidFill.alpha",
       },
     });
     return;
@@ -135,17 +155,29 @@ function emitElement(
       width: { magnitude: w, unit: "PT" },
       height: { magnitude: h, unit: "PT" },
     },
-    transform: { scaleX: 1, scaleY: 1, translateX: x, translateY: y, unit: "PT" },
+    transform: {
+      scaleX: 1,
+      scaleY: 1,
+      translateX: x,
+      translateY: y,
+      unit: "PT",
+    },
   };
 
   if (p.kind === "image") {
-    out.push({ createImage: { objectId: elementId, url: p.src, elementProperties } });
+    out.push({
+      createImage: { objectId: elementId, url: p.src, elementProperties },
+    });
     if (p.crop) emitCrop(out, elementId, p.crop);
     return;
   }
 
   out.push({
-    createShape: { objectId: elementId, shapeType: "TEXT_BOX", elementProperties },
+    createShape: {
+      objectId: elementId,
+      shapeType: "TEXT_BOX",
+      elementProperties,
+    },
   });
 
   if (p.kind === "text") {
@@ -212,7 +244,11 @@ function emitBullets(
           objectId: elementId,
           style: { alignment: PARAGRAPH_ALIGN[b.align] },
           fields: "alignment",
-          textRange: { type: "FIXED_RANGE", startIndex: cursor, endIndex: cursor + lineLen },
+          textRange: {
+            type: "FIXED_RANGE",
+            startIndex: cursor,
+            endIndex: cursor + lineLen,
+          },
         },
       });
     }
@@ -250,11 +286,15 @@ function roleBaseStyle(role: TextRole, theme: Theme): RoleStyle {
   return { ...base, fontSize: sizeOverride ?? base.fontSize };
 }
 
-function mergeStyles(role: TextRole, theme: Theme, run: RunStyle | undefined): ResolvedStyle {
+function mergeStyles(
+  role: TextRole,
+  theme: Theme,
+  run: RunStyle | undefined,
+): ResolvedStyle {
   const base = roleBaseStyle(role, theme);
   const isDisplay = role === "title" || role === "heading";
   const themeFont = isDisplay
-    ? theme.fonts?.display ?? theme.fonts?.body
+    ? (theme.fonts?.display ?? theme.fonts?.body)
     : theme.fonts?.body;
   const themeColor = theme.text;
 
@@ -321,6 +361,56 @@ function pushTextStyle(
   });
 }
 
+function emitScrim(
+  out: Request[],
+  slideId: string,
+  slideIdx: number,
+  scrim: number | Color,
+  page: PageDims,
+): void {
+  const objectId = `sk_scrim_${slideIdx}`;
+  let rgb: { red: number; green: number; blue: number } | null = null;
+  let alpha = 1;
+  if (typeof scrim === "number") {
+    rgb = { red: 0, green: 0, blue: 0 };
+    alpha = Math.max(0, Math.min(1, scrim));
+  } else {
+    rgb = parseColor(scrim);
+  }
+  if (!rgb) return;
+
+  out.push({
+    createShape: {
+      objectId,
+      shapeType: "RECTANGLE",
+      elementProperties: {
+        pageObjectId: slideId,
+        size: {
+          width: { magnitude: page.widthPt, unit: "PT" },
+          height: { magnitude: page.heightPt, unit: "PT" },
+        },
+        transform: {
+          scaleX: 1,
+          scaleY: 1,
+          translateX: 0,
+          translateY: 0,
+          unit: "PT",
+        },
+      },
+    },
+  });
+  out.push({
+    updateShapeProperties: {
+      objectId,
+      shapeProperties: {
+        shapeBackgroundFill: { solidFill: { color: { rgbColor: rgb }, alpha } },
+        outline: { propertyState: "NOT_RENDERED" },
+      },
+      fields: "shapeBackgroundFill.solidFill,outline.propertyState",
+    },
+  });
+}
+
 function emitCrop(out: Request[], objectId: string, crop: ImageCrop): void {
   out.push({
     updateImageProperties: {
@@ -339,7 +429,9 @@ function emitCrop(out: Request[], objectId: string, crop: ImageCrop): void {
   });
 }
 
-export function parseColor(c: Color): { red: number; green: number; blue: number } | null {
+export function parseColor(
+  c: Color,
+): { red: number; green: number; blue: number } | null {
   let s = c.trim();
   if (s.startsWith("#")) s = s.slice(1);
   if (/^[0-9a-fA-F]{3}$/.test(s)) {
@@ -358,7 +450,9 @@ export function parseColor(c: Color): { red: number; green: number; blue: number
   return null;
 }
 
-export function deleteAllSlidesRequests(presentation: slides_v1.Schema$Presentation): Request[] {
+export function deleteAllSlidesRequests(
+  presentation: slides_v1.Schema$Presentation,
+): Request[] {
   const slides = presentation.slides ?? [];
   return slides
     .map((s) => s.objectId)
@@ -366,7 +460,9 @@ export function deleteAllSlidesRequests(presentation: slides_v1.Schema$Presentat
     .map((objectId) => ({ deleteObject: { objectId } }));
 }
 
-export function presentationPageDims(p: slides_v1.Schema$Presentation): PageDims {
+export function presentationPageDims(
+  p: slides_v1.Schema$Presentation,
+): PageDims {
   const size = p.pageSize;
   const w = size?.width;
   const h = size?.height;

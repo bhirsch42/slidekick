@@ -1,4 +1,10 @@
-import { layoutDeck, type Placed, SLIDE_H, SLIDE_W, type SlideLayout } from "./layout.js";
+import {
+  layoutDeck,
+  type Placed,
+  SLIDE_H,
+  SLIDE_W,
+  type SlideLayout,
+} from "./layout.js";
 import type {
   Background,
   Color,
@@ -6,8 +12,8 @@ import type {
   Run,
   RunStyle,
   SizeToken,
-  Theme,
   TextRole,
+  Theme,
 } from "./types.js";
 
 const SCALE = 80;
@@ -43,15 +49,21 @@ export function renderHtml(input: DeckInput): string {
   const { theme, slides } = normalize(input);
   const slidesHtml = slides
     .map((slideLayout, i) => {
-      const items = slideLayout.placed.map((p) => placedToHtml(p, theme)).join("\n");
-      const maxStep = slideLayout.placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
+      const items = slideLayout.placed
+        .map((p) => placedToHtml(p, theme))
+        .join("\n");
+      const maxStep = slideLayout.placed.reduce(
+        (m, p) => Math.max(m, maxStepOf(p)),
+        0,
+      );
       const bg = slideLayout.background ?? theme.background;
       const bgStyle = bgToCss(bg);
+      const scrim = scrimDiv(bg);
       const themeText = theme.text ? `color:${escapeAttr(theme.text)};` : "";
       const themeFont = theme.fonts?.body
         ? `font-family:${escapeAttr(theme.fonts.body)};`
         : "";
-      return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${items}<div class="step-badge"></div></section>`;
+      return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}<div class="step-badge"></div></section>`;
     })
     .join("\n");
 
@@ -78,6 +90,7 @@ export function renderHtml(input: DeckInput): string {
     background-position: center;
   }
   .slide.focused { outline-color: #4a9eff; }
+  .scrim { position: absolute; inset: 0; pointer-events: none; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
   .role-subtitle { font-size: 22px; justify-content: center; }
@@ -168,6 +181,16 @@ function bgToCss(bg: Background | undefined): string {
   return `background-image:url(${JSON.stringify(bg.image)});`;
 }
 
+function scrimDiv(bg: Background | undefined): string {
+  if (typeof bg !== "object" || bg === null || bg.scrim === undefined)
+    return "";
+  const color =
+    typeof bg.scrim === "number"
+      ? `rgba(0,0,0,${Math.max(0, Math.min(1, bg.scrim))})`
+      : bg.scrim;
+  return `<div class="scrim" style="background:${escapeAttr(color)};"></div>`;
+}
+
 function maxStepOf(p: Placed): number {
   if (p.kind === "bullets") {
     return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
@@ -185,13 +208,17 @@ function placedToHtml(p: Placed, theme: Theme): string {
   if (p.kind === "bullets") {
     const lis = p.bullets
       .map((b) => {
-        const a = b.align && TEXT_ALIGN[b.align] ? `text-align:${TEXT_ALIGN[b.align]};` : "";
+        const a =
+          b.align && TEXT_ALIGN[b.align]
+            ? `text-align:${TEXT_ALIGN[b.align]};`
+            : "";
         return `<li data-step="${b.step}" style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
       })
       .join("");
     return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
   }
-  const ta = p.align && TEXT_ALIGN[p.align] ? `text-align:${TEXT_ALIGN[p.align]};` : "";
+  const ta =
+    p.align && TEXT_ALIGN[p.align] ? `text-align:${TEXT_ALIGN[p.align]};` : "";
   return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
 }
 
@@ -206,13 +233,20 @@ function runsToHtml(runs: Run[], role: TextRole, theme: Theme): string {
     .join("");
 }
 
-function runStyleCss(style: RunStyle | undefined, role: TextRole, theme: Theme): string {
+function runStyleCss(
+  style: RunStyle | undefined,
+  role: TextRole,
+  theme: Theme,
+): string {
   if (!style) return "";
   const parts: string[] = [];
   const base = ROLE_STYLES[role].fontSize;
   let size: number | undefined;
   if (style.size !== undefined) {
-    size = typeof style.size === "number" ? style.size : base * SIZE_TOKENS[style.size];
+    size =
+      typeof style.size === "number"
+        ? style.size
+        : base * SIZE_TOKENS[style.size];
   }
   if (style.cite) {
     size = (size ?? base) * 0.75;
@@ -228,9 +262,18 @@ function runStyleCss(style: RunStyle | undefined, role: TextRole, theme: Theme):
 }
 
 function escapeText(s: string): string {
-  return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
+  return s.replace(
+    /[&<>]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c,
+  );
 }
 
 function escapeAttr(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ] ?? c,
+  );
 }

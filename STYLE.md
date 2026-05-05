@@ -61,7 +61,7 @@ The dominant pattern. Background image + a single short label or title
 anchored to the top or bottom. **Never** dump a paragraph over a photo.
 
 ```tsx
-<Slide background={{ image: STREET }} align="end">
+<Slide background={{ image: STREET, scrim: 0.45 }} align="end">
   <Title>Streets at golden hour</Title>
 </Slide>
 ```
@@ -69,6 +69,9 @@ anchored to the top or bottom. **Never** dump a paragraph over a photo.
 - Use `align="end"` (bottom) for captions and titles. `align="start"` (top)
   for floater labels in all caps.
 - One textual element, max two. If you need three, break the slide.
+- **Always set `scrim`** on overlay slides (see "Text protection" below).
+  Skipping it means the next reader-with-different-monitor sees a
+  white-on-white slide.
 
 ### 3. Pull quote
 
@@ -245,6 +248,32 @@ elements that already fill the area) it's a no-op.
 - Source images should be at least 1600px on the long edge for projection.
 - Public HTTPS URLs only. Slides will refuse to import private or
   redirect-walled hosts.
+
+### Text protection (scrim)
+
+Any photograph that has text laid over it needs a **scrim** — a
+darkening overlay between the image and the content. Without it, the
+moment a photo has a bright patch where your text sits, the text
+disappears.
+
+```tsx
+<Slide background={{ image: PHOTO, scrim: 0.4 }} align="end">
+  <Title>Caption goes here</Title>
+</Slide>
+```
+
+- `scrim` is a number from `0` (transparent) to `1` (opaque black). Most
+  decks want `0.3`–`0.5`.
+- For dark text on a bright photo, pass a string instead:
+  `scrim: "rgba(255,255,255,0.5)"`.
+- Don't use scrim on solid-color slides — it's a no-op there. The whole
+  point is to recover legibility against an unpredictable photograph.
+- Tune by content position: text anchored to the bottom (`align="end"`)
+  often needs a heavier scrim than text anchored to the top, because
+  bottoms-of-photos tend to carry more highlight detail (sky, faces).
+- If you need scrim only on part of the photo, cut the image in
+  pre-production. Slidekick has no gradient-scrim primitive; one
+  uniform alpha is the rule.
 
 ## Custom components
 
