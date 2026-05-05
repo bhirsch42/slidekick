@@ -22,7 +22,9 @@ import {
 const program = new Command();
 program
   .name("slidekick")
-  .description("Author Google Slides decks as TSX. Push and pull from real presentations.")
+  .description(
+    "Author Google Slides decks as TSX. Push and pull from real presentations.",
+  )
   .version("0.1.0");
 
 const auth = program.command("auth").description("Authentication");
@@ -67,7 +69,10 @@ program
     }
     await writeFile(deckPath, STARTER_DECK);
     await writeFile(join(target, "tsconfig.json"), STARTER_TSCONFIG);
-    await writeFile(join(target, "package.json"), starterPackageJson(basename(target)));
+    await writeFile(
+      join(target, "package.json"),
+      starterPackageJson(basename(target)),
+    );
     await writeFile(join(target, ".gitignore"), STARTER_GITIGNORE);
     console.log(`scaffolded slidekick deck in ${target}`);
     console.log("");
@@ -76,7 +81,9 @@ program
     console.log("  bun install");
     console.log("  slidekick auth login");
     console.log("  slidekick dev                            # local preview");
-    console.log('  slidekick new deck.tsx --title "My Deck" # create on Slides');
+    console.log(
+      '  slidekick new deck.tsx --title "My Deck" # create on Slides',
+    );
   });
 
 program
@@ -93,7 +100,9 @@ program
       process.exit(1);
     }
 
-    const sseControllers = new Set<ReadableStreamDefaultController<Uint8Array>>();
+    const sseControllers = new Set<
+      ReadableStreamDefaultController<Uint8Array>
+    >();
     const encoder = new TextEncoder();
 
     const server = Bun.serve({
@@ -116,7 +125,8 @@ program
             headers: { "content-type": "text/html; charset=utf-8" },
           });
         } catch (err) {
-          const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
+          const stack =
+            err instanceof Error ? (err.stack ?? err.message) : String(err);
           return new Response(errorPage(stack), {
             status: 500,
             headers: { "content-type": "text/html; charset=utf-8" },
@@ -164,7 +174,9 @@ program
     if (!id) throw new Error("Failed to create presentation");
 
     const deletes = deleteAllSlidesRequests(created.data);
-    const writes = deckToRequests(deck, { page: presentationPageDims(created.data) });
+    const writes = deckToRequests(deck, {
+      page: presentationPageDims(created.data),
+    });
     await slides.presentations.batchUpdate({
       presentationId: id,
       requestBody: { requests: [...deletes, ...writes] },
@@ -192,7 +204,9 @@ program
     const { slides } = await getClients();
     const existing = await slides.presentations.get({ presentationId: id });
     const deletes = deleteAllSlidesRequests(existing.data);
-    const writes = deckToRequests(deck, { page: presentationPageDims(existing.data) });
+    const writes = deckToRequests(deck, {
+      page: presentationPageDims(existing.data),
+    });
     await slides.presentations.batchUpdate({
       presentationId: id,
       requestBody: { requests: [...deletes, ...writes] },
@@ -261,7 +275,10 @@ function makeSseStream(
 }
 
 function errorPage(stack: string): string {
-  const escaped = stack.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
+  const escaped = stack.replace(
+    /[&<>]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c,
+  );
   return `<!doctype html><html><body style="margin:0;background:#1a1a1a;color:#f55;font-family:ui-monospace,monospace">
 <pre style="padding:24px;white-space:pre-wrap">${escaped}</pre>
 <script>const sse=new EventSource("/sse");sse.onmessage=(e)=>{if(e.data==="reload")location.reload();};</script>

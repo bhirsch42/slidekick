@@ -5,7 +5,6 @@ export type { TextRole };
 export interface BulletItem {
     runs: Run[];
     align?: ParagraphAlign;
-    step: number;
 }
 export type Placed = {
     kind: "text";
@@ -16,7 +15,6 @@ export type Placed = {
     y: number;
     w: number;
     h: number;
-    step: number;
 } | {
     kind: "bullets";
     bullets: BulletItem[];
@@ -24,7 +22,6 @@ export type Placed = {
     y: number;
     w: number;
     h: number;
-    step: number;
 } | {
     kind: "image";
     src: string;
@@ -35,7 +32,6 @@ export type Placed = {
     y: number;
     w: number;
     h: number;
-    step: number;
 };
 export interface SlideLayout {
     background?: Background;

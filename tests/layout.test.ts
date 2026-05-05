@@ -9,7 +9,10 @@ describe("layout", () => {
         children: [
           Title({ children: "Hello" }),
           Bullets({
-            children: [Bullet({ children: "one" }), Bullet({ children: "two" })],
+            children: [
+              Bullet({ children: "one" }),
+              Bullet({ children: "two" }),
+            ],
           }),
         ],
       }),
@@ -27,10 +30,9 @@ describe("layout", () => {
 
     expect(bulletsP!.kind).toBe("bullets");
     if (bulletsP!.kind === "bullets") {
-      expect(bulletsP!.bullets.map((b) => b.runs.map((r) => r.text).join(""))).toEqual([
-        "one",
-        "two",
-      ]);
+      expect(
+        bulletsP!.bullets.map((b) => b.runs.map((r) => r.text).join("")),
+      ).toEqual(["one", "two"]);
     }
 
     for (const p of items) {
@@ -53,7 +55,9 @@ describe("layout", () => {
   });
 
   test("background carries through to slide layout", () => {
-    const deck = [Slide({ background: "#111", children: [Title({ children: "x" })] })];
+    const deck = [
+      Slide({ background: "#111", children: [Title({ children: "x" })] }),
+    ];
     const sl = layoutDeck(deck)[0]!;
     expect(sl.background).toBe("#111");
   });

@@ -1,5 +1,8 @@
-import { layoutDeck, SLIDE_H, SLIDE_W } from "./layout.js";
-export const DEFAULT_PAGE = { widthPt: SLIDE_W * 72, heightPt: SLIDE_H * 72 };
+import { layoutDeck, SLIDE_H, SLIDE_W, } from "./layout.js";
+export const DEFAULT_PAGE = {
+    widthPt: SLIDE_W * 72,
+    heightPt: SLIDE_H * 72,
+};
 const DEFAULT_ROLE_STYLE = {
     title: { fontSize: 36, bold: true },
     subtitle: { fontSize: 22 },
@@ -87,16 +90,28 @@ function emitElement(out, slideId, elementId, p, x, y, w, h, theme) {
             width: { magnitude: w, unit: "PT" },
             height: { magnitude: h, unit: "PT" },
         },
-        transform: { scaleX: 1, scaleY: 1, translateX: x, translateY: y, unit: "PT" },
+        transform: {
+            scaleX: 1,
+            scaleY: 1,
+            translateX: x,
+            translateY: y,
+            unit: "PT",
+        },
     };
     if (p.kind === "image") {
-        out.push({ createImage: { objectId: elementId, url: p.src, elementProperties } });
+        out.push({
+            createImage: { objectId: elementId, url: p.src, elementProperties },
+        });
         if (p.crop)
             emitCrop(out, elementId, p.crop);
         return;
     }
     out.push({
-        createShape: { objectId: elementId, shapeType: "TEXT_BOX", elementProperties },
+        createShape: {
+            objectId: elementId,
+            shapeType: "TEXT_BOX",
+            elementProperties,
+        },
     });
     if (p.kind === "text") {
         emitRuns(out, elementId, p.runs, p.role, theme, p.align);
@@ -146,7 +161,11 @@ function emitBullets(out, elementId, bullets, theme) {
                     objectId: elementId,
                     style: { alignment: PARAGRAPH_ALIGN[b.align] },
                     fields: "alignment",
-                    textRange: { type: "FIXED_RANGE", startIndex: cursor, endIndex: cursor + lineLen },
+                    textRange: {
+                        type: "FIXED_RANGE",
+                        startIndex: cursor,
+                        endIndex: cursor + lineLen,
+                    },
                 },
             });
         }
@@ -178,7 +197,7 @@ function mergeStyles(role, theme, run) {
     const base = roleBaseStyle(role, theme);
     const isDisplay = role === "title" || role === "heading";
     const themeFont = isDisplay
-        ? theme.fonts?.display ?? theme.fonts?.body
+        ? (theme.fonts?.display ?? theme.fonts?.body)
         : theme.fonts?.body;
     const themeColor = theme.text;
     let fontSize = base.fontSize;
@@ -262,7 +281,13 @@ function emitScrim(out, slideId, slideIdx, scrim, page) {
                     width: { magnitude: page.widthPt, unit: "PT" },
                     height: { magnitude: page.heightPt, unit: "PT" },
                 },
-                transform: { scaleX: 1, scaleY: 1, translateX: 0, translateY: 0, unit: "PT" },
+                transform: {
+                    scaleX: 1,
+                    scaleY: 1,
+                    translateX: 0,
+                    translateY: 0,
+                    unit: "PT",
+                },
             },
         },
     });

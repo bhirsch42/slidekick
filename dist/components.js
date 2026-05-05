@@ -47,7 +47,8 @@ export function flattenInline(children) {
         if (text === "")
             return;
         const last = out[out.length - 1];
-        if (last && stylesEqual(last.style, isEmptyStyle(style) ? undefined : style)) {
+        if (last &&
+            stylesEqual(last.style, isEmptyStyle(style) ? undefined : style)) {
             last.text += text;
             return;
         }
@@ -82,7 +83,6 @@ export function flattenInline(children) {
 export function Slide(props) {
     return {
         kind: "slide",
-        step: props.step,
         background: props.background,
         align: props.align,
         children: flatten(props.children),
@@ -91,7 +91,6 @@ export function Slide(props) {
 export function Columns(props) {
     return {
         kind: "columns",
-        step: props.step,
         gap: props.gap,
         children: flatten(props.children),
     };
@@ -99,41 +98,59 @@ export function Columns(props) {
 export function Column(props) {
     return {
         kind: "column",
-        step: props.step,
         weight: props.weight,
         children: flatten(props.children),
     };
 }
 export function Title(props) {
-    return { kind: "title", step: props.step, runs: flattenInline(props.children), align: props.align };
+    return {
+        kind: "title",
+        runs: flattenInline(props.children),
+        align: props.align,
+    };
 }
 export function Subtitle(props) {
-    return { kind: "subtitle", step: props.step, runs: flattenInline(props.children), align: props.align };
+    return {
+        kind: "subtitle",
+        runs: flattenInline(props.children),
+        align: props.align,
+    };
 }
 export function Heading(props) {
-    return { kind: "heading", step: props.step, runs: flattenInline(props.children), align: props.align };
+    return {
+        kind: "heading",
+        runs: flattenInline(props.children),
+        align: props.align,
+    };
 }
 export function Bullets(props) {
-    return { kind: "bullets", step: props.step, children: flatten(props.children) };
+    return {
+        kind: "bullets",
+        children: flatten(props.children),
+    };
 }
 export function Bullet(props) {
-    return { kind: "bullet", step: props.step, runs: flattenInline(props.children), align: props.align };
+    return {
+        kind: "bullet",
+        runs: flattenInline(props.children),
+        align: props.align,
+    };
 }
 export function Text(props) {
-    return { kind: "text", step: props.step, runs: flattenInline(props.children), align: props.align };
+    return {
+        kind: "text",
+        runs: flattenInline(props.children),
+        align: props.align,
+    };
 }
 export function Image(props) {
     return {
         kind: "image",
-        step: props.step,
         src: props.src,
         alt: props.alt,
         fit: props.fit,
         crop: props.crop,
     };
-}
-export function Group(props) {
-    return { kind: "group", step: props.step, children: flatten(props.children) };
 }
 export function Span(props) {
     const style = {};
@@ -156,6 +173,10 @@ export function Strong(props) {
     return { kind: "span", children: props.children, style: { weight: 700 } };
 }
 export function Cite(props) {
-    return { kind: "span", children: props.children, style: { italic: true, cite: true } };
+    return {
+        kind: "span",
+        children: props.children,
+        style: { italic: true, cite: true },
+    };
 }
 //# sourceMappingURL=components.js.map

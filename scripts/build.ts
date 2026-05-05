@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { $ } from "bun";
 import { rm } from "node:fs/promises";
+import { $ } from "bun";
 
 await rm("dist", { recursive: true, force: true });
 

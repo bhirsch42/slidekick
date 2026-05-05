@@ -18,7 +18,9 @@ export function makeOAuth2Client(): OAuth2Client {
   const redirectUri =
     process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:4242/oauth2callback";
   if (!clientId || !clientSecret) {
-    throw new Error("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment.");
+    throw new Error(
+      "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment.",
+    );
   }
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }

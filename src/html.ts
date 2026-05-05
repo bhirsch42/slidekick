@@ -52,10 +52,6 @@ export function renderHtml(input: DeckInput): string {
       const items = slideLayout.placed
         .map((p) => placedToHtml(p, theme))
         .join("\n");
-      const maxStep = slideLayout.placed.reduce(
-        (m, p) => Math.max(m, maxStepOf(p)),
-        0,
-      );
       const bg = slideLayout.background ?? theme.background;
       const bgStyle = bgToCss(bg);
       const scrim = scrimDiv(bg);
@@ -63,7 +59,7 @@ export function renderHtml(input: DeckInput): string {
       const themeFont = theme.fonts?.body
         ? `font-family:${escapeAttr(theme.fonts.body)};`
         : "";
-      return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}<div class="step-badge"></div></section>`;
+      return `<section class="slide" data-index="${i}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}</section>`;
     })
     .join("\n");
 
@@ -102,15 +98,6 @@ export function renderHtml(input: DeckInput): string {
   img.placed { object-fit: contain; }
   img.fit-cover { object-fit: cover; }
   img.fit-fill { object-fit: fill; }
-  .stepped-hidden { visibility: hidden; }
-  .step-badge {
-    position: absolute; right: 8px; bottom: 8px;
-    font: 11px/1 ui-monospace, monospace;
-    color: #888; background: rgba(255,255,255,0.85);
-    padding: 3px 6px; border-radius: 3px;
-    pointer-events: none;
-  }
-  .slide[data-max-step="0"] .step-badge { display: none; }
 </style>
 </head>
 <body>
@@ -118,17 +105,6 @@ ${slidesHtml}
 <script>
   const slides = Array.from(document.querySelectorAll('.slide'));
   let focused = slides[0] ?? null;
-
-  function applySteps(slide) {
-    const cur = +slide.dataset.currentStep;
-    slide.querySelectorAll('[data-step]').forEach((el) => {
-      const st = +el.dataset.step;
-      el.classList.toggle('stepped-hidden', st > cur);
-    });
-    const max = +slide.dataset.maxStep;
-    const badge = slide.querySelector('.step-badge');
-    if (badge) badge.textContent = max > 0 ? ('step ' + cur + ' / ' + max) : '';
-  }
 
   function setFocused(s) {
     if (focused) focused.classList.remove('focused');
@@ -138,35 +114,8 @@ ${slidesHtml}
 
   slides.forEach((s) => {
     s.addEventListener('click', () => setFocused(s));
-    applySteps(s);
   });
   if (focused) focused.classList.add('focused');
-
-  document.addEventListener('keydown', (e) => {
-    if (!focused) return;
-    if (e.key === 'ArrowRight') {
-      const cur = +focused.dataset.currentStep;
-      const max = +focused.dataset.maxStep;
-      if (cur < max) {
-        focused.dataset.currentStep = String(cur + 1);
-        applySteps(focused);
-        e.preventDefault();
-      }
-    } else if (e.key === 'ArrowLeft') {
-      const cur = +focused.dataset.currentStep;
-      if (cur > 0) {
-        focused.dataset.currentStep = String(cur - 1);
-        applySteps(focused);
-        e.preventDefault();
-      }
-    } else if (e.key === '0') {
-      focused.dataset.currentStep = '0';
-      applySteps(focused);
-    } else if (e.key === 'End') {
-      focused.dataset.currentStep = focused.dataset.maxStep;
-      applySteps(focused);
-    }
-  });
 
   const sse = new EventSource("/sse");
   sse.onmessage = (e) => { if (e.data === "reload") location.reload(); };
@@ -191,19 +140,12 @@ function scrimDiv(bg: Background | undefined): string {
   return `<div class="scrim" style="background:${escapeAttr(color)};"></div>`;
 }
 
-function maxStepOf(p: Placed): number {
-  if (p.kind === "bullets") {
-    return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
-  }
-  return p.step;
-}
-
 function placedToHtml(p: Placed, theme: Theme): string {
   const inset = `left:${p.x * SCALE}px;top:${p.y * SCALE}px;width:${p.w * SCALE}px;height:${p.h * SCALE}px`;
   if (p.kind === "image") {
     const fitClass =
       p.fit === "cover" ? " fit-cover" : p.fit === "fill" ? " fit-fill" : "";
-    return `<img class="placed${fitClass}" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
+    return `<img class="placed${fitClass}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
   }
   if (p.kind === "bullets") {
     const lis = p.bullets
@@ -212,14 +154,14 @@ function placedToHtml(p: Placed, theme: Theme): string {
           b.align && TEXT_ALIGN[b.align]
             ? `text-align:${TEXT_ALIGN[b.align]};`
             : "";
-        return `<li data-step="${b.step}" style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
+        return `<li style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
       })
       .join("");
-    return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
+    return `<ul class="placed bullets" style="${inset}">${lis}</ul>`;
   }
   const ta =
     p.align && TEXT_ALIGN[p.align] ? `text-align:${TEXT_ALIGN[p.align]};` : "";
-  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
+  return `<div class="placed role-${p.role}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
 }
 
 function runsToHtml(runs: Run[], role: TextRole, theme: Theme): string {

@@ -12,7 +12,6 @@ import type {
   Deck,
   DeckInput,
   ImageCrop,
-  ImageFit,
   Run,
   RunStyle,
   SizeToken,
@@ -226,7 +225,7 @@ function emitRuns(
 function emitBullets(
   out: Request[],
   elementId: string,
-  bullets: { runs: Run[]; align?: string; step: number }[],
+  bullets: { runs: Run[]; align?: string }[],
   theme: Theme,
 ): void {
   const lineTexts = bullets.map((b) => b.runs.map((r) => r.text).join(""));

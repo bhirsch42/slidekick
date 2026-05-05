@@ -1,2 +1,2 @@
-export { Slide, Columns, Column, Title, Subtitle, Heading, Bullets, Bullet, Text, Image, Group, Span, Em, Strong, Cite, } from "./components.js";
+export { Bullet, Bullets, Cite, Column, Columns, Em, Heading, Image, Slide, Span, Strong, Subtitle, Text, Title, } from "./components.js";
 //# sourceMappingURL=index.js.map

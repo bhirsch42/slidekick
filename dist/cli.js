@@ -1939,8 +1939,6 @@ Content:
 - <Bullet>         one bullet point.
 - <Text>           a paragraph or short prose.
 - <Image src>      an image. src must be a public HTTPS URL.
-- <Group>          layout-transparent container that auto-numbers
-                   reveal steps for its direct children (preview only).
 
 ## Composition rules
 
@@ -1957,6 +1955,29 @@ Content:
 - 5\u20137 bullets per slide max. Split into multiple slides if crowded.
 - Prefer <Columns> over crowding a single column with too much content.
 - When unsure, default to a <Slide> with a <Title> and <Bullets>.
+
+## Reveals (showing content one item at a time)
+
+There is no built-in step or animation feature. To reveal content
+progressively, duplicate the slide and add the new content on each
+copy. Keep titles and shared elements identical across the duplicates
+so the deck reads as a single slide advancing.
+
+\`\`\`tsx
+<Slide>
+  <Title>Plan</Title>
+  <Bullets>
+    <Bullet>First</Bullet>
+  </Bullets>
+</Slide>,
+<Slide>
+  <Title>Plan</Title>
+  <Bullets>
+    <Bullet>First</Bullet>
+    <Bullet>Second</Bullet>
+  </Bullets>
+</Slide>,
+\`\`\`
 
 ## Workflow
 
@@ -2070,7 +2091,6 @@ var HEADING_H = 0.5;
 var TEXT_NAT_H = 0.6;
 var BULLET_NAT_H = 0.4;
 var IMAGE_NAT_H = 3;
-var constStep = (s) => () => s;
 function layoutDeck(deck) {
   return deck.map(layoutSlide);
 }
@@ -2079,12 +2099,16 @@ function layoutSlide(slide) {
   const hasChildren = slide.children.length > 0;
   const padded = !slide.background || hasChildren;
   const pad = padded ? PAD : 0;
-  const area = { x: pad, y: pad, w: SLIDE_W - 2 * pad, h: SLIDE_H - 2 * pad };
-  const slideStep = slide.step ?? 0;
+  const area = {
+    x: pad,
+    y: pad,
+    w: SLIDE_W - 2 * pad,
+    h: SLIDE_H - 2 * pad
+  };
   if (slide.align && hasChildren) {
-    layoutAligned(slide.children, area, out, slideStep, slide.align);
+    layoutAligned(slide.children, area, out, slide.align);
   } else {
-    layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
+    layoutVertical(slide.children, area, out);
   }
   return { background: slide.background, align: slide.align, placed: out };
 }
@@ -2109,13 +2133,12 @@ function naturalHeight(child) {
     case "image":
       return IMAGE_NAT_H;
     case "columns":
-    case "group":
       return 1;
     default:
       return TEXT_NAT_H;
   }
 }
-function layoutVertical(children, area, out, stepFor, inheritedStep) {
+function layoutVertical(children, area, out) {
   if (children.length === 0)
     return;
   const fixedTotal = children.reduce((s, c) => s + (fixedHeight(c) ?? 0), 0);
@@ -2127,11 +2150,11 @@ function layoutVertical(children, area, out, stepFor, inheritedStep) {
   for (let i = 0;i < children.length; i++) {
     const child = children[i];
     const h = fixedHeight(child) ?? flexEach;
-    layoutChild(child, { x: area.x, y, w: area.w, h }, out, stepFor(i), inheritedStep);
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out);
     y += h + GAP;
   }
 }
-function layoutAligned(children, area, out, inheritedStep, align) {
+function layoutAligned(children, area, out, align) {
   const heights = children.map(naturalHeight);
   const totalGaps = Math.max(0, children.length - 1) * GAP;
   const total = heights.reduce((s, h) => s + h, 0) + totalGaps;
@@ -2141,12 +2164,11 @@ function layoutAligned(children, area, out, inheritedStep, align) {
   for (let i = 0;i < children.length; i++) {
     const child = children[i];
     const h = heights[i];
-    layoutChild(child, { x: area.x, y, w: area.w, h }, out, inheritedStep, inheritedStep);
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out);
     y += h + GAP;
   }
 }
-function layoutChild(node, area, out, stepHint, inheritedStep) {
-  const step = node.step ?? stepHint;
+function layoutChild(node, area, out) {
   switch (node.kind) {
     case "title":
     case "subtitle":
@@ -2157,17 +2179,15 @@ function layoutChild(node, area, out, stepHint, inheritedStep) {
         role: node.kind,
         runs: node.runs,
         align: node.align,
-        ...area,
-        step
+        ...area
       });
       return;
     case "bullets": {
       const bullets = node.children.map((b) => ({
         runs: b.runs,
-        align: b.align,
-        step: b.step ?? step
+        align: b.align
       }));
-      out.push({ kind: "bullets", bullets, ...area, step });
+      out.push({ kind: "bullets", bullets, ...area });
       return;
     }
     case "image":
@@ -2177,8 +2197,7 @@ function layoutChild(node, area, out, stepHint, inheritedStep) {
         alt: node.alt,
         fit: node.fit ?? "contain",
         crop: node.crop,
-        ...area,
-        step
+        ...area
       });
       return;
     case "columns": {
@@ -2192,16 +2211,9 @@ function layoutChild(node, area, out, stepHint, inheritedStep) {
       let x = area.x;
       for (const col of cols) {
         const w = (col.weight ?? 1) / totalWeight * usableW;
-        const colStep = col.step ?? step;
-        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out, constStep(colStep), colStep);
+        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out);
         x += w + gap;
       }
-      return;
-    }
-    case "group": {
-      const explicit = typeof node.step === "number";
-      const stepFor = explicit ? constStep(step) : (i) => i + 1;
-      layoutVertical(node.children, area, out, stepFor, step);
       return;
     }
   }
@@ -2232,13 +2244,12 @@ function renderHtml(input) {
   const slidesHtml = slides.map((slideLayout, i) => {
     const items = slideLayout.placed.map((p) => placedToHtml(p, theme)).join(`
 `);
-    const maxStep = slideLayout.placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
     const bg = slideLayout.background ?? theme.background;
     const bgStyle = bgToCss(bg);
     const scrim = scrimDiv(bg);
     const themeText = theme.text ? `color:${escapeAttr(theme.text)};` : "";
     const themeFont = theme.fonts?.body ? `font-family:${escapeAttr(theme.fonts.body)};` : "";
-    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}<div class="step-badge"></div></section>`;
+    return `<section class="slide" data-index="${i}" style="${bgStyle}${themeText}${themeFont}">${scrim}${items}</section>`;
   }).join(`
 `);
   return `<!doctype html>
@@ -2276,15 +2287,6 @@ function renderHtml(input) {
   img.placed { object-fit: contain; }
   img.fit-cover { object-fit: cover; }
   img.fit-fill { object-fit: fill; }
-  .stepped-hidden { visibility: hidden; }
-  .step-badge {
-    position: absolute; right: 8px; bottom: 8px;
-    font: 11px/1 ui-monospace, monospace;
-    color: #888; background: rgba(255,255,255,0.85);
-    padding: 3px 6px; border-radius: 3px;
-    pointer-events: none;
-  }
-  .slide[data-max-step="0"] .step-badge { display: none; }
 </style>
 </head>
 <body>
@@ -2292,17 +2294,6 @@ ${slidesHtml}
 <script>
   const slides = Array.from(document.querySelectorAll('.slide'));
   let focused = slides[0] ?? null;
-
-  function applySteps(slide) {
-    const cur = +slide.dataset.currentStep;
-    slide.querySelectorAll('[data-step]').forEach((el) => {
-      const st = +el.dataset.step;
-      el.classList.toggle('stepped-hidden', st > cur);
-    });
-    const max = +slide.dataset.maxStep;
-    const badge = slide.querySelector('.step-badge');
-    if (badge) badge.textContent = max > 0 ? ('step ' + cur + ' / ' + max) : '';
-  }
 
   function setFocused(s) {
     if (focused) focused.classList.remove('focused');
@@ -2312,35 +2303,8 @@ ${slidesHtml}
 
   slides.forEach((s) => {
     s.addEventListener('click', () => setFocused(s));
-    applySteps(s);
   });
   if (focused) focused.classList.add('focused');
-
-  document.addEventListener('keydown', (e) => {
-    if (!focused) return;
-    if (e.key === 'ArrowRight') {
-      const cur = +focused.dataset.currentStep;
-      const max = +focused.dataset.maxStep;
-      if (cur < max) {
-        focused.dataset.currentStep = String(cur + 1);
-        applySteps(focused);
-        e.preventDefault();
-      }
-    } else if (e.key === 'ArrowLeft') {
-      const cur = +focused.dataset.currentStep;
-      if (cur > 0) {
-        focused.dataset.currentStep = String(cur - 1);
-        applySteps(focused);
-        e.preventDefault();
-      }
-    } else if (e.key === '0') {
-      focused.dataset.currentStep = '0';
-      applySteps(focused);
-    } else if (e.key === 'End') {
-      focused.dataset.currentStep = focused.dataset.maxStep;
-      applySteps(focused);
-    }
-  });
 
   const sse = new EventSource("/sse");
   sse.onmessage = (e) => { if (e.data === "reload") location.reload(); };
@@ -2361,27 +2325,21 @@ function scrimDiv(bg) {
   const color = typeof bg.scrim === "number" ? `rgba(0,0,0,${Math.max(0, Math.min(1, bg.scrim))})` : bg.scrim;
   return `<div class="scrim" style="background:${escapeAttr(color)};"></div>`;
 }
-function maxStepOf(p) {
-  if (p.kind === "bullets") {
-    return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
-  }
-  return p.step;
-}
 function placedToHtml(p, theme) {
   const inset = `left:${p.x * SCALE}px;top:${p.y * SCALE}px;width:${p.w * SCALE}px;height:${p.h * SCALE}px`;
   if (p.kind === "image") {
     const fitClass = p.fit === "cover" ? " fit-cover" : p.fit === "fill" ? " fit-fill" : "";
-    return `<img class="placed${fitClass}" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
+    return `<img class="placed${fitClass}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
   }
   if (p.kind === "bullets") {
     const lis = p.bullets.map((b) => {
       const a = b.align && TEXT_ALIGN[b.align] ? `text-align:${TEXT_ALIGN[b.align]};` : "";
-      return `<li data-step="${b.step}" style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
+      return `<li style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
     }).join("");
-    return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
+    return `<ul class="placed bullets" style="${inset}">${lis}</ul>`;
   }
   const ta = p.align && TEXT_ALIGN[p.align] ? `text-align:${TEXT_ALIGN[p.align]};` : "";
-  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
+  return `<div class="placed role-${p.role}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
 }
 function runsToHtml(runs, role, theme) {
   return runs.map((r) => {
@@ -2429,7 +2387,7 @@ function escapeAttr(s) {
 // src/load.ts
 import { pathToFileURL } from "url";
 async function loadDeck(entry) {
-  const url = pathToFileURL(entry).href + `?t=${Date.now()}`;
+  const url = `${pathToFileURL(entry).href}?t=${Date.now()}`;
   const mod = await import(url);
   const deckFn = mod.default;
   if (typeof deckFn !== "function") {
@@ -2508,7 +2466,33 @@ function presentationToDeck(p) {
   const result = { slides: slideNodes };
   if (Object.keys(theme).length > 0)
     result.theme = theme;
+  warnEphemeralImageUrls(result);
   return result;
+}
+function isEphemeralUrl(url) {
+  return /googleusercontent\.com\/(slidesz|presentation)/.test(url);
+}
+function warnEphemeralImageUrls(deck) {
+  const urls = new Set;
+  const visit = (children) => {
+    for (const c of children) {
+      if (c.kind === "image" && isEphemeralUrl(c.src))
+        urls.add(c.src);
+      else if (c.kind === "columns") {
+        for (const col of c.children)
+          visit(col.children);
+      }
+    }
+  };
+  for (const s of deck.slides) {
+    visit(s.children);
+    if (s.background && typeof s.background !== "string" && isEphemeralUrl(s.background.image)) {
+      urls.add(s.background.image);
+    }
+  }
+  if (urls.size > 0) {
+    console.warn(`slidekick: ${urls.size} image URL(s) are short-lived Google CDN links (googleusercontent.com/slidesz/...) that will expire within hours. Pushing this TSX back later may produce broken images. Replace with stable source URLs before re-pushing.`);
+  }
 }
 function slideToNode(slide, pageW, pageH, theme) {
   const elements = (slide.pageElements ?? []).slice().sort((a, b) => yOf(a) - yOf(b));
@@ -2536,10 +2520,25 @@ function slideToNode(slide, pageW, pageH, theme) {
     }
   }
   const children = [];
-  for (const el of contentEls) {
-    const child = elementToChild(el);
-    if (child)
-      children.push(child);
+  for (const row of groupRows(contentEls)) {
+    if (row.length === 1) {
+      const child = elementToChild(row[0]);
+      if (child)
+        children.push(child);
+      continue;
+    }
+    const sorted = row.slice().sort((a, b) => boundsOf(a).x - boundsOf(b).x);
+    const cols = [];
+    for (const el of sorted) {
+      const child = elementToChild(el);
+      if (child)
+        cols.push({ kind: "column", children: [child] });
+    }
+    if (cols.length > 1) {
+      children.push({ kind: "columns", children: cols });
+    } else if (cols.length === 1) {
+      children.push(...cols[0].children);
+    }
   }
   const node = { kind: "slide", children };
   if (background !== undefined)
@@ -2574,6 +2573,42 @@ function isFullPageImage(el, pageW, pageH) {
 }
 function yOf(el) {
   return el.transform?.translateY ?? 0;
+}
+function boundsOf(el) {
+  const sx = el.transform?.scaleX ?? 1;
+  const sy = el.transform?.scaleY ?? 1;
+  const tx = el.transform?.translateX ?? 0;
+  const ty = el.transform?.translateY ?? 0;
+  const w = (el.size?.width?.magnitude ?? 0) * sx;
+  const h = (el.size?.height?.magnitude ?? 0) * sy;
+  return { x: tx, y: ty, w, h };
+}
+function groupRows(els) {
+  const sorted = els.slice().sort((a, b) => yOf(a) - yOf(b));
+  const rows = [];
+  for (const el of sorted) {
+    const b = boundsOf(el);
+    const last = rows[rows.length - 1];
+    if (last && shouldJoinRow(last, b)) {
+      last.push(el);
+    } else {
+      rows.push([el]);
+    }
+  }
+  return rows;
+}
+function shouldJoinRow(row, b) {
+  for (const m of row) {
+    const mb = boundsOf(m);
+    const vOverlap = Math.min(mb.y + mb.h, b.y + b.h) - Math.max(mb.y, b.y);
+    const minH = Math.min(mb.h, b.h);
+    if (minH <= 0 || vOverlap / minH < 0.5)
+      return false;
+    const hOverlap = Math.min(mb.x + mb.w, b.x + b.w) - Math.max(mb.x, b.x);
+    if (hOverlap > Math.min(mb.w, b.w) * 0.1)
+      return false;
+  }
+  return true;
 }
 function elementToChild(el) {
   if (el.image?.contentUrl || el.image?.sourceUrl) {
@@ -2652,7 +2687,6 @@ function parseParagraphs(text) {
         }
         if (i < lines.length - 1) {
           flush();
-          currentBullet = currentBullet;
         }
       });
     }
@@ -2745,7 +2779,7 @@ function rgbToHex(rgb) {
   const r = Math.round((rgb.red ?? 0) * 255);
   const g = Math.round((rgb.green ?? 0) * 255);
   const b = Math.round((rgb.blue ?? 0) * 255);
-  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 function inferTheme(p) {
   const theme = {};
@@ -2891,14 +2925,6 @@ ${indent}  </Column>`;
 ${cols}
 ${indent}</Columns>`;
     }
-    case "group": {
-      used.add("Group");
-      const inner = node.children.map((c) => renderChild(c, used, `${indent}  `)).join(`
-`);
-      return `${indent}<Group>
-${inner}
-${indent}</Group>`;
-    }
   }
 }
 function renderRuns(runs, used) {
@@ -2923,11 +2949,14 @@ function renderRuns(runs, used) {
   }).join("");
 }
 function escapeJsxText(s) {
-  return s.replace(/[{}<>]/g, (c) => `{${JSON.stringify(c)}}`);
+  return s.replace(/[{}<>\n]/g, (c) => `{${JSON.stringify(c)}}`);
 }
 
 // src/slides_writer.ts
-var DEFAULT_PAGE = { widthPt: SLIDE_W * 72, heightPt: SLIDE_H * 72 };
+var DEFAULT_PAGE = {
+  widthPt: SLIDE_W * 72,
+  heightPt: SLIDE_H * 72
+};
 var DEFAULT_ROLE_STYLE = {
   title: { fontSize: 36, bold: true },
   subtitle: { fontSize: 22 },
@@ -3015,16 +3044,28 @@ function emitElement(out, slideId, elementId, p, x, y, w, h, theme) {
       width: { magnitude: w, unit: "PT" },
       height: { magnitude: h, unit: "PT" }
     },
-    transform: { scaleX: 1, scaleY: 1, translateX: x, translateY: y, unit: "PT" }
+    transform: {
+      scaleX: 1,
+      scaleY: 1,
+      translateX: x,
+      translateY: y,
+      unit: "PT"
+    }
   };
   if (p.kind === "image") {
-    out.push({ createImage: { objectId: elementId, url: p.src, elementProperties } });
+    out.push({
+      createImage: { objectId: elementId, url: p.src, elementProperties }
+    });
     if (p.crop)
       emitCrop(out, elementId, p.crop);
     return;
   }
   out.push({
-    createShape: { objectId: elementId, shapeType: "TEXT_BOX", elementProperties }
+    createShape: {
+      objectId: elementId,
+      shapeType: "TEXT_BOX",
+      elementProperties
+    }
   });
   if (p.kind === "text") {
     emitRuns(out, elementId, p.runs, p.role, theme, p.align);
@@ -3074,7 +3115,11 @@ function emitBullets(out, elementId, bullets, theme) {
           objectId: elementId,
           style: { alignment: PARAGRAPH_ALIGN[b.align] },
           fields: "alignment",
-          textRange: { type: "FIXED_RANGE", startIndex: cursor, endIndex: cursor + lineLen }
+          textRange: {
+            type: "FIXED_RANGE",
+            startIndex: cursor,
+            endIndex: cursor + lineLen
+          }
         }
       });
     }
@@ -3187,7 +3232,13 @@ function emitScrim(out, slideId, slideIdx, scrim, page) {
           width: { magnitude: page.widthPt, unit: "PT" },
           height: { magnitude: page.heightPt, unit: "PT" }
         },
-        transform: { scaleX: 1, scaleY: 1, translateX: 0, translateY: 0, unit: "PT" }
+        transform: {
+          scaleX: 1,
+          scaleY: 1,
+          translateX: 0,
+          translateY: 0,
+          unit: "PT"
+        }
       }
     }
   });
@@ -3371,7 +3422,9 @@ program2.command("new").description("Create a new Google Slides presentation fro
   if (!id)
     throw new Error("Failed to create presentation");
   const deletes = deleteAllSlidesRequests(created.data);
-  const writes = deckToRequests(deck, { page: presentationPageDims(created.data) });
+  const writes = deckToRequests(deck, {
+    page: presentationPageDims(created.data)
+  });
   await slides.presentations.batchUpdate({
     presentationId: id,
     requestBody: { requests: [...deletes, ...writes] }
@@ -3390,7 +3443,9 @@ program2.command("push").description("Overwrite an existing Google Slides deck")
   const { slides } = await getClients();
   const existing = await slides.presentations.get({ presentationId: id });
   const deletes = deleteAllSlidesRequests(existing.data);
-  const writes = deckToRequests(deck, { page: presentationPageDims(existing.data) });
+  const writes = deckToRequests(deck, {
+    page: presentationPageDims(existing.data)
+  });
   await slides.presentations.batchUpdate({
     presentationId: id,
     requestBody: { requests: [...deletes, ...writes] }

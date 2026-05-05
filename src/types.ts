@@ -1,7 +1,3 @@
-export interface Stepped {
-  step?: number;
-}
-
 export type Color = string;
 
 export type SizeToken = "sm" | "md" | "lg";
@@ -49,55 +45,55 @@ export type Background = Color | { image: string; scrim?: number | Color };
 
 export type SlideAlign = "start" | "center" | "end";
 
-export interface SlideNode extends Stepped {
+export interface SlideNode {
   kind: "slide";
   children: SlideChild[];
   background?: Background;
   align?: SlideAlign;
 }
 
-export interface ColumnsNode extends Stepped {
+export interface ColumnsNode {
   kind: "columns";
   gap?: number;
   children: ColumnNode[];
 }
 
-export interface ColumnNode extends Stepped {
+export interface ColumnNode {
   kind: "column";
   weight?: number;
   children: SlideChild[];
 }
 
-export interface TitleNode extends Stepped {
+export interface TitleNode {
   kind: "title";
   runs: Run[];
   align?: ParagraphAlign;
 }
 
-export interface SubtitleNode extends Stepped {
+export interface SubtitleNode {
   kind: "subtitle";
   runs: Run[];
   align?: ParagraphAlign;
 }
 
-export interface HeadingNode extends Stepped {
+export interface HeadingNode {
   kind: "heading";
   runs: Run[];
   align?: ParagraphAlign;
 }
 
-export interface BulletsNode extends Stepped {
+export interface BulletsNode {
   kind: "bullets";
   children: BulletNode[];
 }
 
-export interface BulletNode extends Stepped {
+export interface BulletNode {
   kind: "bullet";
   runs: Run[];
   align?: ParagraphAlign;
 }
 
-export interface TextNode extends Stepped {
+export interface TextNode {
   kind: "text";
   runs: Run[];
   align?: ParagraphAlign;
@@ -112,17 +108,12 @@ export interface ImageCrop {
   left?: number;
 }
 
-export interface ImageNode extends Stepped {
+export interface ImageNode {
   kind: "image";
   src: string;
   alt?: string;
   fit?: ImageFit;
   crop?: ImageCrop;
-}
-
-export interface GroupNode extends Stepped {
-  kind: "group";
-  children: SlideChild[];
 }
 
 export type SlideChild =
@@ -132,8 +123,7 @@ export type SlideChild =
   | BulletsNode
   | TextNode
   | ImageNode
-  | ColumnsNode
-  | GroupNode;
+  | ColumnsNode;
 
 export type Node = SlideNode | SlideChild | BulletNode | ColumnNode | SpanNode;
 

@@ -43,8 +43,6 @@ Content:
 - <Bullet>         one bullet point.
 - <Text>           a paragraph or short prose.
 - <Image src>      an image. src must be a public HTTPS URL.
-- <Group>          layout-transparent container that auto-numbers
-                   reveal steps for its direct children (preview only).
 
 ## Composition rules
 
@@ -61,6 +59,29 @@ Content:
 - 5–7 bullets per slide max. Split into multiple slides if crowded.
 - Prefer <Columns> over crowding a single column with too much content.
 - When unsure, default to a <Slide> with a <Title> and <Bullets>.
+
+## Reveals (showing content one item at a time)
+
+There is no built-in step or animation feature. To reveal content
+progressively, duplicate the slide and add the new content on each
+copy. Keep titles and shared elements identical across the duplicates
+so the deck reads as a single slide advancing.
+
+\`\`\`tsx
+<Slide>
+  <Title>Plan</Title>
+  <Bullets>
+    <Bullet>First</Bullet>
+  </Bullets>
+</Slide>,
+<Slide>
+  <Title>Plan</Title>
+  <Bullets>
+    <Bullet>First</Bullet>
+    <Bullet>Second</Bullet>
+  </Bullets>
+</Slide>,
+\`\`\`
 
 ## Workflow
 

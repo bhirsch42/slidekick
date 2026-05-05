@@ -1,6 +1,5 @@
 import type {
   Background,
-  BulletNode,
   ColumnNode,
   Deck,
   ImageCrop,
@@ -30,7 +29,6 @@ export type { TextRole };
 export interface BulletItem {
   runs: Run[];
   align?: ParagraphAlign;
-  step: number;
 }
 
 export type Placed =
@@ -43,7 +41,6 @@ export type Placed =
       y: number;
       w: number;
       h: number;
-      step: number;
     }
   | {
       kind: "bullets";
@@ -52,7 +49,6 @@ export type Placed =
       y: number;
       w: number;
       h: number;
-      step: number;
     }
   | {
       kind: "image";
@@ -64,7 +60,6 @@ export type Placed =
       y: number;
       w: number;
       h: number;
-      step: number;
     };
 
 export interface SlideLayout {
@@ -80,10 +75,6 @@ interface Box {
   h: number;
 }
 
-type StepFor = (i: number) => number;
-
-const constStep = (s: number): StepFor => () => s;
-
 export function layoutDeck(deck: Deck): SlideLayout[] {
   return deck.map(layoutSlide);
 }
@@ -93,12 +84,16 @@ function layoutSlide(slide: SlideNode): SlideLayout {
   const hasChildren = slide.children.length > 0;
   const padded = !slide.background || hasChildren;
   const pad = padded ? PAD : 0;
-  const area: Box = { x: pad, y: pad, w: SLIDE_W - 2 * pad, h: SLIDE_H - 2 * pad };
-  const slideStep = slide.step ?? 0;
+  const area: Box = {
+    x: pad,
+    y: pad,
+    w: SLIDE_W - 2 * pad,
+    h: SLIDE_H - 2 * pad,
+  };
   if (slide.align && hasChildren) {
-    layoutAligned(slide.children, area, out, slideStep, slide.align);
+    layoutAligned(slide.children, area, out, slide.align);
   } else {
-    layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
+    layoutVertical(slide.children, area, out);
   }
   return { background: slide.background, align: slide.align, placed: out };
 }
@@ -121,7 +116,6 @@ function naturalHeight(child: SlideChild): number {
     case "image":
       return IMAGE_NAT_H;
     case "columns":
-    case "group":
       return 1.0;
     default:
       return TEXT_NAT_H;
@@ -132,8 +126,6 @@ function layoutVertical(
   children: SlideChild[],
   area: Box,
   out: Placed[],
-  stepFor: StepFor,
-  inheritedStep: number,
 ): void {
   if (children.length === 0) return;
   const fixedTotal = children.reduce((s, c) => s + (fixedHeight(c) ?? 0), 0);
@@ -146,7 +138,7 @@ function layoutVertical(
   for (let i = 0; i < children.length; i++) {
     const child = children[i]!;
     const h = fixedHeight(child) ?? flexEach;
-    layoutChild(child, { x: area.x, y, w: area.w, h }, out, stepFor(i), inheritedStep);
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out);
     y += h + GAP;
   }
 }
@@ -155,7 +147,6 @@ function layoutAligned(
   children: SlideChild[],
   area: Box,
   out: Placed[],
-  inheritedStep: number,
   align: SlideAlign,
 ): void {
   const heights = children.map(naturalHeight);
@@ -167,19 +158,12 @@ function layoutAligned(
   for (let i = 0; i < children.length; i++) {
     const child = children[i]!;
     const h = heights[i]!;
-    layoutChild(child, { x: area.x, y, w: area.w, h }, out, inheritedStep, inheritedStep);
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out);
     y += h + GAP;
   }
 }
 
-function layoutChild(
-  node: SlideChild,
-  area: Box,
-  out: Placed[],
-  stepHint: number,
-  inheritedStep: number,
-): void {
-  const step = node.step ?? stepHint;
+function layoutChild(node: SlideChild, area: Box, out: Placed[]): void {
   switch (node.kind) {
     case "title":
     case "subtitle":
@@ -191,16 +175,14 @@ function layoutChild(
         runs: node.runs,
         align: node.align,
         ...area,
-        step,
       });
       return;
     case "bullets": {
-      const bullets: BulletItem[] = node.children.map((b: BulletNode) => ({
+      const bullets: BulletItem[] = node.children.map((b) => ({
         runs: b.runs,
         align: b.align,
-        step: b.step ?? step,
       }));
-      out.push({ kind: "bullets", bullets, ...area, step });
+      out.push({ kind: "bullets", bullets, ...area });
       return;
     }
     case "image":
@@ -211,35 +193,24 @@ function layoutChild(
         fit: node.fit ?? "contain",
         crop: node.crop,
         ...area,
-        step,
       });
       return;
     case "columns": {
       const cols = node.children;
       if (cols.length === 0) return;
-      const totalWeight = cols.reduce((s, c: ColumnNode) => s + (c.weight ?? 1), 0);
+      const totalWeight = cols.reduce(
+        (s, c: ColumnNode) => s + (c.weight ?? 1),
+        0,
+      );
       const gap = node.gap ?? 0.3;
       const totalGap = (cols.length - 1) * gap;
       const usableW = Math.max(0, area.w - totalGap);
       let x = area.x;
       for (const col of cols) {
         const w = ((col.weight ?? 1) / totalWeight) * usableW;
-        const colStep = col.step ?? step;
-        layoutVertical(
-          col.children,
-          { x, y: area.y, w, h: area.h },
-          out,
-          constStep(colStep),
-          colStep,
-        );
+        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out);
         x += w + gap;
       }
-      return;
-    }
-    case "group": {
-      const explicit = typeof node.step === "number";
-      const stepFor: StepFor = explicit ? constStep(step) : (i) => i + 1;
-      layoutVertical(node.children, area, out, stepFor, step);
       return;
     }
   }

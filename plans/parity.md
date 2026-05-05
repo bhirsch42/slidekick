@@ -142,7 +142,6 @@ Make `slidekick pull` round-trip the new vocab.
 - **Image crop UX** — `crop` shipped in PR 2 but only the IJF reaction shots
   use it lightly; revisit if a deck needs interactive cropping.
 - **Speaker notes round-trip** — JSON has `notesPage`; not modeled in TSX yet.
-- **Step/animation parity** — out of scope here; `step` already exists.
 
 ## Open follow-ups
 

@@ -7,8 +7,7 @@ export declare function Fragment(props: {
 }): unknown;
 export declare namespace JSX {
     type Element = Node | Node[] | readonly Node[] | null | undefined | false;
-    interface IntrinsicElements {
-    }
+    type IntrinsicElements = {};
     interface ElementChildrenAttribute {
         children: Record<string, unknown>;
     }

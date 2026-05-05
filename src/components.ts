@@ -6,7 +6,6 @@ import type {
   Color,
   ColumnNode,
   ColumnsNode,
-  GroupNode,
   HeadingNode,
   ImageCrop,
   ImageFit,
@@ -37,7 +36,10 @@ function flatten<T>(c: Children<T> | undefined): T[] {
   return [c as T];
 }
 
-function stylesEqual(a: RunStyle | undefined, b: RunStyle | undefined): boolean {
+function stylesEqual(
+  a: RunStyle | undefined,
+  b: RunStyle | undefined,
+): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
   return (
@@ -79,7 +81,10 @@ export function flattenInline(children: InlineChildren | undefined): Run[] {
   function pushText(text: string, style: RunStyle): void {
     if (text === "") return;
     const last = out[out.length - 1];
-    if (last && stylesEqual(last.style, isEmptyStyle(style) ? undefined : style)) {
+    if (
+      last &&
+      stylesEqual(last.style, isEmptyStyle(style) ? undefined : style)
+    ) {
       last.text += text;
       return;
     }
@@ -114,19 +119,16 @@ export function flattenInline(children: InlineChildren | undefined): Run[] {
 
 interface TextProps {
   children: TextChildren;
-  step?: number;
   align?: ParagraphAlign;
 }
 
 export function Slide(props: {
   children?: Children<SlideChild>;
-  step?: number;
   background?: Background;
   align?: SlideAlign;
 }): SlideNode {
   return {
     kind: "slide",
-    step: props.step,
     background: props.background,
     align: props.align,
     children: flatten<SlideChild>(props.children),
@@ -136,11 +138,9 @@ export function Slide(props: {
 export function Columns(props: {
   children?: Children<ColumnNode>;
   gap?: number;
-  step?: number;
 }): ColumnsNode {
   return {
     kind: "columns",
-    step: props.step,
     gap: props.gap,
     children: flatten<ColumnNode>(props.children),
   };
@@ -149,59 +149,76 @@ export function Columns(props: {
 export function Column(props: {
   children?: Children<SlideChild>;
   weight?: number;
-  step?: number;
 }): ColumnNode {
   return {
     kind: "column",
-    step: props.step,
     weight: props.weight,
     children: flatten<SlideChild>(props.children),
   };
 }
 
 export function Title(props: TextProps): TitleNode {
-  return { kind: "title", step: props.step, runs: flattenInline(props.children), align: props.align };
+  return {
+    kind: "title",
+    runs: flattenInline(props.children),
+    align: props.align,
+  };
 }
 
 export function Subtitle(props: TextProps): SubtitleNode {
-  return { kind: "subtitle", step: props.step, runs: flattenInline(props.children), align: props.align };
+  return {
+    kind: "subtitle",
+    runs: flattenInline(props.children),
+    align: props.align,
+  };
 }
 
 export function Heading(props: TextProps): HeadingNode {
-  return { kind: "heading", step: props.step, runs: flattenInline(props.children), align: props.align };
+  return {
+    kind: "heading",
+    runs: flattenInline(props.children),
+    align: props.align,
+  };
 }
 
-export function Bullets(props: { children: Children<BulletNode>; step?: number }): BulletsNode {
-  return { kind: "bullets", step: props.step, children: flatten<BulletNode>(props.children) };
+export function Bullets(props: {
+  children: Children<BulletNode>;
+}): BulletsNode {
+  return {
+    kind: "bullets",
+    children: flatten<BulletNode>(props.children),
+  };
 }
 
 export function Bullet(props: TextProps): BulletNode {
-  return { kind: "bullet", step: props.step, runs: flattenInline(props.children), align: props.align };
+  return {
+    kind: "bullet",
+    runs: flattenInline(props.children),
+    align: props.align,
+  };
 }
 
 export function Text(props: TextProps): TextNode {
-  return { kind: "text", step: props.step, runs: flattenInline(props.children), align: props.align };
+  return {
+    kind: "text",
+    runs: flattenInline(props.children),
+    align: props.align,
+  };
 }
 
 export function Image(props: {
   src: string;
   alt?: string;
-  step?: number;
   fit?: ImageFit;
   crop?: ImageCrop;
 }): ImageNode {
   return {
     kind: "image",
-    step: props.step,
     src: props.src,
     alt: props.alt,
     fit: props.fit,
     crop: props.crop,
   };
-}
-
-export function Group(props: { children?: Children<SlideChild>; step?: number }): GroupNode {
-  return { kind: "group", step: props.step, children: flatten<SlideChild>(props.children) };
 }
 
 export function Span(props: {
@@ -230,7 +247,11 @@ export function Strong(props: { children?: TextChildren }): SpanNode {
 }
 
 export function Cite(props: { children?: TextChildren }): SpanNode {
-  return { kind: "span", children: props.children, style: { italic: true, cite: true } };
+  return {
+    kind: "span",
+    children: props.children,
+    style: { italic: true, cite: true },
+  };
 }
 
 // Re-export for unused-import suppression in transitive imports.

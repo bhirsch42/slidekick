@@ -14,8 +14,12 @@ import {
 } from "../src/slides_writer.js";
 import type { Deck } from "../src/types.js";
 
-const hasEnv = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-const hasToken = await loadTokens().then((t) => t !== null).catch(() => false);
+const hasEnv = !!(
+  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+);
+const hasToken = await loadTokens()
+  .then((t) => t !== null)
+  .catch(() => false);
 const RUN_LIVE = hasEnv && hasToken;
 
 if (!RUN_LIVE) {
@@ -66,7 +70,9 @@ describe.skipIf(!RUN_LIVE)("live round-trip against Google Slides", () => {
     presentationId = id;
 
     const deletes = deleteAllSlidesRequests(created.data);
-    const writes = deckToRequests(deck, { page: presentationPageDims(created.data) });
+    const writes = deckToRequests(deck, {
+      page: presentationPageDims(created.data),
+    });
     await slides.presentations.batchUpdate({
       presentationId,
       requestBody: { requests: [...deletes, ...writes] },
@@ -81,7 +87,9 @@ describe.skipIf(!RUN_LIVE)("live round-trip against Google Slides", () => {
       await drive.files.delete({ fileId: presentationId });
       console.log(`  deleted: ${presentationId}`);
     } catch (e) {
-      console.warn(`  cleanup failed (delete manually): ${(e as Error).message}`);
+      console.warn(
+        `  cleanup failed (delete manually): ${(e as Error).message}`,
+      );
     }
   });
 
@@ -100,10 +108,13 @@ describe.skipIf(!RUN_LIVE)("live round-trip against Google Slides", () => {
     expect(kinds).toContain("title");
     expect(kinds).toContain("subtitle");
 
-    const titleNode = pulled.slides[0]!.children.find((c) => c.kind === "title");
-    const text = titleNode && "runs" in titleNode
-      ? titleNode.runs.map((r) => r.text).join("")
-      : "";
+    const titleNode = pulled.slides[0]!.children.find(
+      (c) => c.kind === "title",
+    );
+    const text =
+      titleNode && "runs" in titleNode
+        ? titleNode.runs.map((r) => r.text).join("")
+        : "";
     expect(text).toBe("Round-trip test");
   });
 
@@ -111,7 +122,9 @@ describe.skipIf(!RUN_LIVE)("live round-trip against Google Slides", () => {
     const { slides } = await getClients();
     const got = await slides.presentations.get({ presentationId });
     const pulled = presentationToDeck(got.data);
-    const bulletsNode = pulled.slides[1]!.children.find((c) => c.kind === "bullets");
+    const bulletsNode = pulled.slides[1]!.children.find(
+      (c) => c.kind === "bullets",
+    );
     expect(bulletsNode).toBeTruthy();
     if (bulletsNode && bulletsNode.kind === "bullets") {
       expect(bulletsNode.children).toHaveLength(3);

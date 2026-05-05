@@ -7,10 +7,40 @@ export function presentationToDeck(p) {
     const result = { slides: slideNodes };
     if (Object.keys(theme).length > 0)
         result.theme = theme;
+    warnEphemeralImageUrls(result);
     return result;
 }
+function isEphemeralUrl(url) {
+    return /googleusercontent\.com\/(slidesz|presentation)/.test(url);
+}
+function warnEphemeralImageUrls(deck) {
+    const urls = new Set();
+    const visit = (children) => {
+        for (const c of children) {
+            if (c.kind === "image" && isEphemeralUrl(c.src))
+                urls.add(c.src);
+            else if (c.kind === "columns") {
+                for (const col of c.children)
+                    visit(col.children);
+            }
+        }
+    };
+    for (const s of deck.slides) {
+        visit(s.children);
+        if (s.background &&
+            typeof s.background !== "string" &&
+            isEphemeralUrl(s.background.image)) {
+            urls.add(s.background.image);
+        }
+    }
+    if (urls.size > 0) {
+        console.warn(`slidekick: ${urls.size} image URL(s) are short-lived Google CDN links (googleusercontent.com/slidesz/...) that will expire within hours. Pushing this TSX back later may produce broken images. Replace with stable source URLs before re-pushing.`);
+    }
+}
 function slideToNode(slide, pageW, pageH, theme) {
-    const elements = (slide.pageElements ?? []).slice().sort((a, b) => yOf(a) - yOf(b));
+    const elements = (slide.pageElements ?? [])
+        .slice()
+        .sort((a, b) => yOf(a) - yOf(b));
     let background;
     const contentEls = [];
     for (const el of elements) {
@@ -36,10 +66,26 @@ function slideToNode(slide, pageW, pageH, theme) {
         }
     }
     const children = [];
-    for (const el of contentEls) {
-        const child = elementToChild(el);
-        if (child)
-            children.push(child);
+    for (const row of groupRows(contentEls)) {
+        if (row.length === 1) {
+            const child = elementToChild(row[0]);
+            if (child)
+                children.push(child);
+            continue;
+        }
+        const sorted = row.slice().sort((a, b) => boundsOf(a).x - boundsOf(b).x);
+        const cols = [];
+        for (const el of sorted) {
+            const child = elementToChild(el);
+            if (child)
+                cols.push({ kind: "column", children: [child] });
+        }
+        if (cols.length > 1) {
+            children.push({ kind: "columns", children: cols });
+        }
+        else if (cols.length === 1) {
+            children.push(...cols[0].children);
+        }
     }
     const node = { kind: "slide", children };
     if (background !== undefined)
@@ -74,6 +120,43 @@ function isFullPageImage(el, pageW, pageH) {
 }
 function yOf(el) {
     return el.transform?.translateY ?? 0;
+}
+function boundsOf(el) {
+    const sx = el.transform?.scaleX ?? 1;
+    const sy = el.transform?.scaleY ?? 1;
+    const tx = el.transform?.translateX ?? 0;
+    const ty = el.transform?.translateY ?? 0;
+    const w = (el.size?.width?.magnitude ?? 0) * sx;
+    const h = (el.size?.height?.magnitude ?? 0) * sy;
+    return { x: tx, y: ty, w, h };
+}
+function groupRows(els) {
+    const sorted = els.slice().sort((a, b) => yOf(a) - yOf(b));
+    const rows = [];
+    for (const el of sorted) {
+        const b = boundsOf(el);
+        const last = rows[rows.length - 1];
+        if (last && shouldJoinRow(last, b)) {
+            last.push(el);
+        }
+        else {
+            rows.push([el]);
+        }
+    }
+    return rows;
+}
+function shouldJoinRow(row, b) {
+    for (const m of row) {
+        const mb = boundsOf(m);
+        const vOverlap = Math.min(mb.y + mb.h, b.y + b.h) - Math.max(mb.y, b.y);
+        const minH = Math.min(mb.h, b.h);
+        if (minH <= 0 || vOverlap / minH < 0.5)
+            return false;
+        const hOverlap = Math.min(mb.x + mb.w, b.x + b.w) - Math.max(mb.x, b.x);
+        if (hOverlap > Math.min(mb.w, b.w) * 0.1)
+            return false;
+    }
+    return true;
 }
 function elementToChild(el) {
     if (el.image?.contentUrl || el.image?.sourceUrl) {
@@ -151,7 +234,6 @@ function parseParagraphs(text) {
                 }
                 if (i < lines.length - 1) {
                     flush();
-                    currentBullet = currentBullet;
                 }
             });
         }
@@ -197,7 +279,9 @@ function collapseRuns(runs, dominant) {
     const out = [];
     for (const r of runs) {
         const filtered = filterToOverrides(r.style, dominant);
-        const stripped = filtered ? { text: r.text, style: filtered } : { text: r.text };
+        const stripped = filtered
+            ? { text: r.text, style: filtered }
+            : { text: r.text };
         const last = out[out.length - 1];
         if (last && sameStyle(last.style, stripped.style)) {
             last.text += stripped.text;
@@ -249,7 +333,7 @@ function rgbToHex(rgb) {
     const r = Math.round((rgb.red ?? 0) * 255);
     const g = Math.round((rgb.green ?? 0) * 255);
     const b = Math.round((rgb.blue ?? 0) * 255);
-    return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+    return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 function inferTheme(p) {
     const theme = {};
@@ -307,7 +391,9 @@ function mode(arr) {
 }
 export function deckToTsx(deck) {
     const used = new Set(["Slide"]);
-    const slidesSrc = deck.slides.map((s) => renderSlide(s, used)).join(",\n    ");
+    const slidesSrc = deck.slides
+        .map((s) => renderSlide(s, used))
+        .join(",\n    ");
     const themeSrc = deck.theme && Object.keys(deck.theme).length > 0
         ? `const theme = ${stringifyTheme(deck.theme)};\n\n`
         : "";
@@ -341,7 +427,9 @@ function renderSlide(slide, used) {
     if (slide.children.length === 0) {
         return `<Slide${props.join("")} />`;
     }
-    const body = slide.children.map((c) => renderChild(c, used, "      ")).join("\n");
+    const body = slide.children
+        .map((c) => renderChild(c, used, "      "))
+        .join("\n");
     return `${open}\n${body}\n    </Slide>`;
 }
 function renderChild(node, used, indent) {
@@ -361,7 +449,9 @@ function renderChild(node, used, indent) {
         case "image": {
             used.add("Image");
             const alt = node.alt ? ` alt=${JSON.stringify(node.alt)}` : "";
-            const fit = node.fit && node.fit !== "contain" ? ` fit=${JSON.stringify(node.fit)}` : "";
+            const fit = node.fit && node.fit !== "contain"
+                ? ` fit=${JSON.stringify(node.fit)}`
+                : "";
             return `${indent}<Image src=${JSON.stringify(node.src)}${alt}${fit} />`;
         }
         case "bullets": {
@@ -377,17 +467,14 @@ function renderChild(node, used, indent) {
             used.add("Column");
             const cols = node.children
                 .map((c) => {
-                const inner = c.children.map((cc) => renderChild(cc, used, `${indent}    `)).join("\n");
+                const inner = c.children
+                    .map((cc) => renderChild(cc, used, `${indent}    `))
+                    .join("\n");
                 const w = c.weight ? ` weight={${c.weight}}` : "";
                 return `${indent}  <Column${w}>\n${inner}\n${indent}  </Column>`;
             })
                 .join("\n");
             return `${indent}<Columns>\n${cols}\n${indent}</Columns>`;
-        }
-        case "group": {
-            used.add("Group");
-            const inner = node.children.map((c) => renderChild(c, used, `${indent}  `)).join("\n");
-            return `${indent}<Group>\n${inner}\n${indent}</Group>`;
         }
     }
 }
@@ -417,6 +504,6 @@ function renderRuns(runs, used) {
         .join("");
 }
 function escapeJsxText(s) {
-    return s.replace(/[{}<>]/g, (c) => `{${JSON.stringify(c)}}`);
+    return s.replace(/[{}<>\n]/g, (c) => `{${JSON.stringify(c)}}`);
 }
 //# sourceMappingURL=slides_reader.js.map

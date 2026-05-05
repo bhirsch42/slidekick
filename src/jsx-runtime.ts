@@ -13,8 +13,15 @@ export function Fragment(props: { children?: unknown }): unknown {
 }
 
 export namespace JSX {
-  export type Element = Node | Node[] | readonly Node[] | null | undefined | false;
-  export interface IntrinsicElements {}
+  export type Element =
+    | Node
+    | Node[]
+    | readonly Node[]
+    | null
+    | undefined
+    | false;
+  // biome-ignore lint/complexity/noBannedTypes: JSX requires this exact shape
+  export type IntrinsicElements = {};
   export interface ElementChildrenAttribute {
     children: Record<string, unknown>;
   }
