@@ -3,6 +3,7 @@ import type {
   Background,
   BulletNode,
   BulletsNode,
+  ColumnNode,
   DeckModule,
   HeadingNode,
   ImageNode,
@@ -20,7 +21,9 @@ type Page = slides_v1.Schema$Page;
 type PageElement = slides_v1.Schema$PageElement;
 type RgbColor = slides_v1.Schema$RgbColor;
 
-export function presentationToDeck(p: slides_v1.Schema$Presentation): DeckModule {
+export function presentationToDeck(
+  p: slides_v1.Schema$Presentation,
+): DeckModule {
   const slides = p.slides ?? [];
   const pageW = p.pageSize?.width?.magnitude ?? 0;
   const pageH = p.pageSize?.height?.magnitude ?? 0;
@@ -30,11 +33,50 @@ export function presentationToDeck(p: slides_v1.Schema$Presentation): DeckModule
   const slideNodes = slides.map((s) => slideToNode(s, pageW, pageH, theme));
   const result: DeckModule = { slides: slideNodes };
   if (Object.keys(theme).length > 0) result.theme = theme;
+  warnEphemeralImageUrls(result);
   return result;
 }
 
-function slideToNode(slide: Page, pageW: number, pageH: number, theme: Theme): SlideNode {
-  const elements = (slide.pageElements ?? []).slice().sort((a, b) => yOf(a) - yOf(b));
+function isEphemeralUrl(url: string): boolean {
+  return /googleusercontent\.com\/(slidesz|presentation)/.test(url);
+}
+
+function warnEphemeralImageUrls(deck: DeckModule): void {
+  const urls = new Set<string>();
+  const visit = (children: SlideChild[]): void => {
+    for (const c of children) {
+      if (c.kind === "image" && isEphemeralUrl(c.src)) urls.add(c.src);
+      else if (c.kind === "columns") {
+        for (const col of c.children) visit(col.children);
+      }
+    }
+  };
+  for (const s of deck.slides) {
+    visit(s.children);
+    if (
+      s.background &&
+      typeof s.background !== "string" &&
+      isEphemeralUrl(s.background.image)
+    ) {
+      urls.add(s.background.image);
+    }
+  }
+  if (urls.size > 0) {
+    console.warn(
+      `slidekick: ${urls.size} image URL(s) are short-lived Google CDN links (googleusercontent.com/slidesz/...) that will expire within hours. Pushing this TSX back later may produce broken images. Replace with stable source URLs before re-pushing.`,
+    );
+  }
+}
+
+function slideToNode(
+  slide: Page,
+  pageW: number,
+  pageH: number,
+  theme: Theme,
+): SlideNode {
+  const elements = (slide.pageElements ?? [])
+    .slice()
+    .sort((a, b) => yOf(a) - yOf(b));
 
   let background: Background | undefined;
   const contentEls: PageElement[] = [];
@@ -62,9 +104,23 @@ function slideToNode(slide: Page, pageW: number, pageH: number, theme: Theme): S
   }
 
   const children: SlideChild[] = [];
-  for (const el of contentEls) {
-    const child = elementToChild(el);
-    if (child) children.push(child);
+  for (const row of groupRows(contentEls)) {
+    if (row.length === 1) {
+      const child = elementToChild(row[0]!);
+      if (child) children.push(child);
+      continue;
+    }
+    const sorted = row.slice().sort((a, b) => boundsOf(a).x - boundsOf(b).x);
+    const cols: ColumnNode[] = [];
+    for (const el of sorted) {
+      const child = elementToChild(el);
+      if (child) cols.push({ kind: "column", children: [child] });
+    }
+    if (cols.length > 1) {
+      children.push({ kind: "columns", children: cols });
+    } else if (cols.length === 1) {
+      children.push(...cols[0]!.children);
+    }
   }
 
   const node: SlideNode = { kind: "slide", children };
@@ -72,7 +128,11 @@ function slideToNode(slide: Page, pageW: number, pageH: number, theme: Theme): S
   return node;
 }
 
-function isFullPageImage(el: PageElement, pageW: number, pageH: number): boolean {
+function isFullPageImage(
+  el: PageElement,
+  pageW: number,
+  pageH: number,
+): boolean {
   if (!el.image) return false;
   if (pageW <= 0 || pageH <= 0) return false;
   const w = el.size?.width?.magnitude;
@@ -94,6 +154,50 @@ function isFullPageImage(el: PageElement, pageW: number, pageH: number): boolean
 
 function yOf(el: PageElement): number {
   return el.transform?.translateY ?? 0;
+}
+
+interface Bounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function boundsOf(el: PageElement): Bounds {
+  const sx = el.transform?.scaleX ?? 1;
+  const sy = el.transform?.scaleY ?? 1;
+  const tx = el.transform?.translateX ?? 0;
+  const ty = el.transform?.translateY ?? 0;
+  const w = (el.size?.width?.magnitude ?? 0) * sx;
+  const h = (el.size?.height?.magnitude ?? 0) * sy;
+  return { x: tx, y: ty, w, h };
+}
+
+function groupRows(els: PageElement[]): PageElement[][] {
+  const sorted = els.slice().sort((a, b) => yOf(a) - yOf(b));
+  const rows: PageElement[][] = [];
+  for (const el of sorted) {
+    const b = boundsOf(el);
+    const last = rows[rows.length - 1];
+    if (last && shouldJoinRow(last, b)) {
+      last.push(el);
+    } else {
+      rows.push([el]);
+    }
+  }
+  return rows;
+}
+
+function shouldJoinRow(row: PageElement[], b: Bounds): boolean {
+  for (const m of row) {
+    const mb = boundsOf(m);
+    const vOverlap = Math.min(mb.y + mb.h, b.y + b.h) - Math.max(mb.y, b.y);
+    const minH = Math.min(mb.h, b.h);
+    if (minH <= 0 || vOverlap / minH < 0.5) return false;
+    const hOverlap = Math.min(mb.x + mb.w, b.x + b.w) - Math.max(mb.x, b.x);
+    if (hOverlap > Math.min(mb.w, b.w) * 0.1) return false;
+  }
+  return true;
 }
 
 function elementToChild(el: PageElement): SlideChild | null {
@@ -186,7 +290,6 @@ function parseParagraphs(text: slides_v1.Schema$TextContent): RawParagraph[] {
         }
         if (i < lines.length - 1) {
           flush();
-          currentBullet = currentBullet;
         }
       });
     }
@@ -224,7 +327,9 @@ function collapseRuns(runs: Run[], dominant: RawStyle): Run[] {
   const out: Run[] = [];
   for (const r of runs) {
     const filtered = filterToOverrides(r.style, dominant);
-    const stripped: Run = filtered ? { text: r.text, style: filtered } : { text: r.text };
+    const stripped: Run = filtered
+      ? { text: r.text, style: filtered }
+      : { text: r.text };
     const last = out[out.length - 1];
     if (last && sameStyle(last.style, stripped.style)) {
       last.text += stripped.text;
@@ -235,14 +340,22 @@ function collapseRuns(runs: Run[], dominant: RawStyle): Run[] {
   return out;
 }
 
-function filterToOverrides(style: RunStyle | undefined, dominant: RawStyle): RunStyle | undefined {
+function filterToOverrides(
+  style: RunStyle | undefined,
+  dominant: RawStyle,
+): RunStyle | undefined {
   if (!style) return undefined;
   const out: RunStyle = {};
-  if (style.size !== undefined && style.size !== dominant.fontSize) out.size = style.size;
-  if (style.weight !== undefined && (style.weight === 700) !== !!dominant.bold) out.weight = style.weight;
-  if (style.italic !== undefined && !!style.italic !== !!dominant.italic) out.italic = style.italic;
-  if (style.font !== undefined && style.font !== dominant.fontFamily) out.font = style.font;
-  if (style.color !== undefined && style.color !== dominant.color) out.color = style.color;
+  if (style.size !== undefined && style.size !== dominant.fontSize)
+    out.size = style.size;
+  if (style.weight !== undefined && (style.weight === 700) !== !!dominant.bold)
+    out.weight = style.weight;
+  if (style.italic !== undefined && !!style.italic !== !!dominant.italic)
+    out.italic = style.italic;
+  if (style.font !== undefined && style.font !== dominant.fontFamily)
+    out.font = style.font;
+  if (style.color !== undefined && style.color !== dominant.color)
+    out.color = style.color;
   return Object.keys(out).length === 0 ? undefined : out;
 }
 
@@ -270,14 +383,16 @@ function rgbToHex(rgb: RgbColor): string | null {
   const r = Math.round((rgb.red ?? 0) * 255);
   const g = Math.round((rgb.green ?? 0) * 255);
   const b = Math.round((rgb.blue ?? 0) * 255);
-  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function inferTheme(p: slides_v1.Schema$Presentation): Theme {
   const theme: Theme = {};
 
   const masterBg = (p.masters ?? [])
-    .map((m) => m.pageProperties?.pageBackgroundFill?.solidFill?.color?.rgbColor)
+    .map(
+      (m) => m.pageProperties?.pageBackgroundFill?.solidFill?.color?.rgbColor,
+    )
     .find((c) => c !== undefined);
   if (masterBg) {
     const hex = rgbToHex(masterBg);
@@ -327,13 +442,17 @@ function mode<T>(arr: T[]): T | undefined {
 
 export function deckToTsx(deck: DeckModule): string {
   const used = new Set<string>(["Slide"]);
-  const slidesSrc = deck.slides.map((s) => renderSlide(s, used)).join(",\n    ");
-  const themeSrc = deck.theme && Object.keys(deck.theme).length > 0
-    ? `const theme = ${stringifyTheme(deck.theme)};\n\n`
-    : "";
-  const returnExpr = deck.theme && Object.keys(deck.theme).length > 0
-    ? `{ theme, slides: [\n    ${slidesSrc},\n  ] }`
-    : `[\n    ${slidesSrc},\n  ]`;
+  const slidesSrc = deck.slides
+    .map((s) => renderSlide(s, used))
+    .join(",\n    ");
+  const themeSrc =
+    deck.theme && Object.keys(deck.theme).length > 0
+      ? `const theme = ${stringifyTheme(deck.theme)};\n\n`
+      : "";
+  const returnExpr =
+    deck.theme && Object.keys(deck.theme).length > 0
+      ? `{ theme, slides: [\n    ${slidesSrc},\n  ] }`
+      : `[\n    ${slidesSrc},\n  ]`;
   const imports = Array.from(used).sort().join(", ");
   return `import { ${imports} } from "slidekick";
 
@@ -353,7 +472,9 @@ function renderSlide(slide: SlideNode, used: Set<string>): string {
     if (typeof slide.background === "string") {
       props.push(` background=${JSON.stringify(slide.background)}`);
     } else {
-      props.push(` background={{ image: ${JSON.stringify(slide.background.image)} }}`);
+      props.push(
+        ` background={{ image: ${JSON.stringify(slide.background.image)} }}`,
+      );
     }
   }
   if (slide.align) props.push(` align=${JSON.stringify(slide.align)}`);
@@ -361,11 +482,17 @@ function renderSlide(slide: SlideNode, used: Set<string>): string {
   if (slide.children.length === 0) {
     return `<Slide${props.join("")} />`;
   }
-  const body = slide.children.map((c) => renderChild(c, used, "      ")).join("\n");
+  const body = slide.children
+    .map((c) => renderChild(c, used, "      "))
+    .join("\n");
   return `${open}\n${body}\n    </Slide>`;
 }
 
-function renderChild(node: SlideChild, used: Set<string>, indent: string): string {
+function renderChild(
+  node: SlideChild,
+  used: Set<string>,
+  indent: string,
+): string {
   switch (node.kind) {
     case "title":
       used.add("Title");
@@ -382,7 +509,10 @@ function renderChild(node: SlideChild, used: Set<string>, indent: string): strin
     case "image": {
       used.add("Image");
       const alt = node.alt ? ` alt=${JSON.stringify(node.alt)}` : "";
-      const fit = node.fit && node.fit !== "contain" ? ` fit=${JSON.stringify(node.fit)}` : "";
+      const fit =
+        node.fit && node.fit !== "contain"
+          ? ` fit=${JSON.stringify(node.fit)}`
+          : "";
       return `${indent}<Image src=${JSON.stringify(node.src)}${alt}${fit} />`;
     }
     case "bullets": {
@@ -398,17 +528,14 @@ function renderChild(node: SlideChild, used: Set<string>, indent: string): strin
       used.add("Column");
       const cols = node.children
         .map((c) => {
-          const inner = c.children.map((cc) => renderChild(cc, used, `${indent}    `)).join("\n");
+          const inner = c.children
+            .map((cc) => renderChild(cc, used, `${indent}    `))
+            .join("\n");
           const w = c.weight ? ` weight={${c.weight}}` : "";
           return `${indent}  <Column${w}>\n${inner}\n${indent}  </Column>`;
         })
         .join("\n");
       return `${indent}<Columns>\n${cols}\n${indent}</Columns>`;
-    }
-    case "group": {
-      used.add("Group");
-      const inner = node.children.map((c) => renderChild(c, used, `${indent}  `)).join("\n");
-      return `${indent}<Group>\n${inner}\n${indent}</Group>`;
     }
   }
 }
@@ -427,7 +554,8 @@ function renderRuns(runs: Run[], used: Set<string>): string {
             : `size=${JSON.stringify(r.style.size)}`,
         );
       }
-      if (r.style.weight !== undefined) attrs.push(`weight={${r.style.weight}}`);
+      if (r.style.weight !== undefined)
+        attrs.push(`weight={${r.style.weight}}`);
       if (r.style.italic) attrs.push(`italic`);
       if (r.style.font) attrs.push(`font=${JSON.stringify(r.style.font)}`);
       if (r.style.color) attrs.push(`color=${JSON.stringify(r.style.color)}`);
@@ -437,5 +565,5 @@ function renderRuns(runs: Run[], used: Set<string>): string {
 }
 
 function escapeJsxText(s: string): string {
-  return s.replace(/[{}<>]/g, (c) => `{${JSON.stringify(c)}}`);
+  return s.replace(/[{}<>\n]/g, (c) => `{${JSON.stringify(c)}}`);
 }
