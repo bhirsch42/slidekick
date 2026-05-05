@@ -1872,6 +1872,11 @@ var require_commander = __commonJS((exports) => {
   exports.InvalidOptionArgumentError = InvalidArgumentError;
 });
 
+// src/cli.ts
+import { watch } from "fs";
+import { access, mkdir as mkdir2, writeFile as writeFile2 } from "fs/promises";
+import { basename, dirname as dirname2, join as join2, resolve } from "path";
+
 // node_modules/commander/esm.mjs
 var import__ = __toESM(require_commander(), 1);
 var {
@@ -1888,103 +1893,12 @@ var {
   Help
 } = import__.default;
 
-// src/commands/init.ts
-import { mkdir, writeFile, access } from "fs/promises";
-import { join, resolve, basename } from "path";
-async function initCommand(dir) {
-  const target = resolve(process.cwd(), dir ?? ".");
-  await mkdir(target, { recursive: true });
-  const deckPath = join(target, "deck.tsx");
-  if (await fileExists(deckPath)) {
-    console.error(`refusing to overwrite existing deck.tsx in ${target}`);
-    process.exit(1);
-  }
-  await writeFile(deckPath, STARTER_DECK);
-  await writeFile(join(target, "tsconfig.json"), STARTER_TSCONFIG);
-  await writeFile(join(target, "package.json"), starterPackageJson(basename(target)));
-  await writeFile(join(target, ".gitignore"), STARTER_GITIGNORE);
-  console.log(`scaffolded slidekick deck in ${target}`);
-  console.log("");
-  console.log("next:");
-  console.log(`  cd ${dir ?? "."}`);
-  console.log("  bun install");
-  console.log("  bun slidekick dev      # live preview");
-  console.log("  bun slidekick build    # render to out/deck.pptx");
-  console.log("  bun slidekick agent    # AI authoring instructions");
-}
-async function fileExists(path) {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-var STARTER_DECK = `import { Slide, Title, Subtitle, Bullets, Bullet } from "slidekick";
-
-export default function deck() {
-  return [
-    <Slide>
-      <Title>Hello, slidekick</Title>
-      <Subtitle>Author decks as TSX. Render to .pptx.</Subtitle>
-    </Slide>,
-    <Slide>
-      <Title>Why slidekick</Title>
-      <Bullets>
-        <Bullet>Slides are code, diffable and reviewable</Bullet>
-        <Bullet>An AI sidekick can author and revise them</Bullet>
-        <Bullet>Output is a real .pptx \u2014 Google Slides compatible</Bullet>
-      </Bullets>
-    </Slide>,
-  ];
-}
-`;
-var STARTER_TSCONFIG = `{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "jsx": "react-jsx",
-    "jsxImportSource": "slidekick",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "noEmit": true
-  },
-  "include": ["**/*.ts", "**/*.tsx"]
-}
-`;
-function starterPackageJson(name) {
-  const safeName = name.replace(/[^a-z0-9-_]/gi, "-").toLowerCase() || "deck";
-  return `{
-  "name": "${safeName}",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "slidekick dev",
-    "build": "slidekick build"
-  },
-  "dependencies": {
-    "slidekick": "github:bhirsch42/slidekick"
-  }
-}
-`;
-}
-var STARTER_GITIGNORE = `node_modules
-out/
-*.pptx
-.DS_Store
-`;
-
-// src/commands/agent.ts
-async function agentCommand() {
-  process.stdout.write(AGENT_INSTRUCTIONS);
-}
+// src/agent.ts
 var AGENT_INSTRUCTIONS = `# Authoring slidekick decks
 
 A slidekick deck is a TSX file that default-exports a function returning an
-array of <Slide> elements. Each slide is composed from slidekick's component
-vocabulary \u2014 a custom JSX runtime maps the tree to real .pptx text boxes.
+array of <Slide> elements. The deck is pushed to Google Slides via the
+slidekick CLI \u2014 slides are real, editable text boxes (not images).
 
 ## File shape
 
@@ -2024,8 +1938,10 @@ Content:
 - <Bullets>        wraps <Bullet> children.
 - <Bullet>         one bullet point.
 - <Text>           a paragraph or short prose.
-- <Image src>      an image. src is a path or URL.
+- <Image src>      an image. src must be a public HTTPS URL.
 - <Quote attribution?>  a pull quote, optionally attributed.
+- <Group>          layout-transparent container that auto-numbers
+                   reveal steps for its direct children (preview only).
 
 ## Composition rules
 
@@ -2043,35 +1959,108 @@ Content:
 - Prefer <Columns> over crowding a single column with too much content.
 - When unsure, default to a <Slide> with a <Title> and <Bullets>.
 
-## Editing workflow
+## Workflow
 
-The user runs \`slidekick dev\` for a live HTML preview that hot-reloads on
-save. \`slidekick build\` produces a real .pptx in out/deck.pptx, editable
-in Google Slides and PowerPoint.
+The user runs:
+
+  slidekick dev                       # local HTML preview, hot-reloads
+  slidekick new deck.tsx --title "X"  # create new Slides deck
+  slidekick push deck.tsx --id <id>   # overwrite an existing Slides deck
+  slidekick pull <id|url> -o deck.tsx # round-trip an existing deck back to TSX
+
+A deck ID is the long string in a Slides URL:
+https://docs.google.com/presentation/d/<ID>/edit
 `;
 
-// src/commands/dev.ts
-import { watch } from "fs";
-import { resolve as resolve2, dirname } from "path";
-import { access as access2 } from "fs/promises";
+// src/auth.ts
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { createServer } from "http";
+import { homedir } from "os";
+import { dirname, join } from "path";
+import { google } from "googleapis";
+var SCOPES = [
+  "https://www.googleapis.com/auth/presentations",
+  "https://www.googleapis.com/auth/drive.file"
+];
+var TOKEN_PATH = join(homedir(), ".config", "slidekick", "token.json");
+function makeOAuth2Client() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:4242/oauth2callback";
+  if (!clientId || !clientSecret) {
+    throw new Error("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment.");
+  }
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
+async function loadTokens() {
+  try {
+    const raw = await readFile(TOKEN_PATH, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+async function saveTokens(tokens) {
+  await mkdir(dirname(TOKEN_PATH), { recursive: true });
+  await writeFile(TOKEN_PATH, JSON.stringify(tokens, null, 2));
+}
+async function getAuthedClient() {
+  const tokens = await loadTokens();
+  if (!tokens) {
+    throw new Error('No saved credentials. Run "slidekick auth login" first.');
+  }
+  const client = makeOAuth2Client();
+  client.setCredentials(tokens);
+  return client;
+}
+async function login() {
+  const client = makeOAuth2Client();
+  const url = client.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    scope: SCOPES
+  });
+  console.log(`
+Open this URL in your browser:
 
-// src/render/load.ts
-import { pathToFileURL } from "url";
-async function loadDeck(entry) {
-  const url = pathToFileURL(entry).href + `?t=${Date.now()}`;
-  const mod = await import(url);
-  const deckFn = mod.default;
-  if (typeof deckFn !== "function") {
-    throw new Error(`deck entry must default-export a function returning Slide[]: ${entry}`);
-  }
-  const result = await deckFn();
-  if (!Array.isArray(result)) {
-    throw new Error(`deck function must return an array of <Slide> elements`);
-  }
-  return result;
+  ${url}
+`);
+  const code = await new Promise((resolve, reject) => {
+    const server = createServer((req, res) => {
+      const u = new URL(req.url ?? "", "http://localhost:4242");
+      const c = u.searchParams.get("code");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><html><body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5"><div style="background:#fff;padding:2rem 3rem;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);text-align:center"><h1 style="margin:0 0 .5rem">slidekick authorized</h1><p style="margin:0;color:#666">You can close this tab.</p></div></body></html>`);
+      server.close();
+      if (c)
+        resolve(c);
+      else
+        reject(new Error("No code in redirect"));
+    });
+    server.listen(4242);
+    console.log(`Waiting for OAuth redirect on http://localhost:4242 ...
+`);
+  });
+  const { tokens } = await client.getToken(code);
+  await saveTokens(tokens);
+  console.log(`
+Saved credentials to ${TOKEN_PATH}`);
+}
+function tokenPath() {
+  return TOKEN_PATH;
+}
+function missingScopeHelp() {
+  return `If you see "insufficient permissions" or "invalid_scope":
+
+  In Google Cloud Console (the project owning these OAuth creds):
+    1. Enable APIs:  Google Slides API, Google Drive API
+    2. OAuth consent screen \u2192 add scopes:
+         ${SCOPES.join(`
+         `)}
+    3. Re-run: slidekick auth login`;
 }
 
-// src/render/layout.ts
+// src/layout.ts
 var SLIDE_W = 13.333;
 var SLIDE_H = 7.5;
 var PAD = 0.5;
@@ -2079,133 +2068,122 @@ var GAP = 0.2;
 var TITLE_H = 1;
 var SUBTITLE_H = 0.7;
 var HEADING_H = 0.5;
-function layoutDeck(slides) {
-  return slides.map(layoutSlide);
+var constStep = (s) => () => s;
+function layoutDeck(deck) {
+  return deck.map(layoutSlide);
 }
 function layoutSlide(slide) {
   const out = [];
   const area = { x: PAD, y: PAD, w: SLIDE_W - 2 * PAD, h: SLIDE_H - 2 * PAD };
-  layoutVertical(slide.children, area, out);
+  const slideStep = slide.step ?? 0;
+  layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
   return out;
 }
-function fixedHeight(type) {
-  if (type === "title")
+function fixedHeight(child) {
+  if (child.kind === "title")
     return TITLE_H;
-  if (type === "subtitle")
+  if (child.kind === "subtitle")
     return SUBTITLE_H;
-  if (type === "heading")
+  if (child.kind === "heading")
     return HEADING_H;
   return null;
 }
-function layoutVertical(children, area, out) {
+function layoutVertical(children, area, out, stepFor, inheritedStep) {
   if (children.length === 0)
     return;
-  const fixedTotal = children.reduce((s, c) => s + (fixedHeight(c.type) ?? 0), 0);
-  const flexCount = children.filter((c) => fixedHeight(c.type) === null).length;
+  const fixedTotal = children.reduce((s, c) => s + (fixedHeight(c) ?? 0), 0);
+  const flexCount = children.filter((c) => fixedHeight(c) === null).length;
   const totalGaps = Math.max(0, children.length - 1) * GAP;
   const flexAvailable = Math.max(0, area.h - fixedTotal - totalGaps);
   const flexEach = flexCount > 0 ? flexAvailable / flexCount : 0;
   let y = area.y;
-  for (const child of children) {
-    const h = fixedHeight(child.type) ?? flexEach;
-    layoutNode(child, { x: area.x, y, w: area.w, h }, out);
+  for (let i = 0;i < children.length; i++) {
+    const child = children[i];
+    const h = fixedHeight(child) ?? flexEach;
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out, stepFor(i), inheritedStep);
     y += h + GAP;
   }
 }
-function layoutNode(node, area, out) {
-  switch (node.type) {
+function layoutChild(node, area, out, stepHint, inheritedStep) {
+  const step = node.step ?? stepHint;
+  switch (node.kind) {
     case "title":
-      out.push({ kind: "text", role: "title", text: extractText(node), ...area });
-      return;
     case "subtitle":
-      out.push({ kind: "text", role: "subtitle", text: extractText(node), ...area });
-      return;
     case "heading":
-      out.push({ kind: "text", role: "heading", text: extractText(node), ...area });
-      return;
     case "text":
-      out.push({ kind: "text", role: "text", text: extractText(node), ...area });
+      out.push({ kind: "text", role: node.kind, text: node.text, ...area, step });
       return;
     case "bullets": {
-      const bullets = node.children.filter((c) => c.type === "bullet").map(extractText);
-      out.push({ kind: "bullets", bullets, ...area });
+      const bullets = node.children.map((b) => ({
+        text: b.text,
+        step: b.step ?? step
+      }));
+      out.push({ kind: "bullets", bullets, ...area, step });
       return;
     }
-    case "bullet":
-      out.push({ kind: "bullets", bullets: [extractText(node)], ...area });
-      return;
     case "image":
-      out.push({
-        kind: "image",
-        src: String(node.props.src ?? ""),
-        alt: node.props.alt,
-        ...area
-      });
+      out.push({ kind: "image", src: node.src, alt: node.alt, ...area, step });
       return;
     case "quote": {
-      const attribution = node.props.attribution;
-      const attrH = attribution ? 0.5 : 0;
+      const attrH = node.attribution ? 0.5 : 0;
       out.push({
         kind: "text",
         role: "quote",
-        text: extractText(node),
+        text: node.text,
         x: area.x,
         y: area.y,
         w: area.w,
-        h: area.h - attrH
+        h: area.h - attrH,
+        step
       });
-      if (attribution) {
+      if (node.attribution) {
         out.push({
           kind: "text",
           role: "attribution",
-          text: `\u2014 ${attribution}`,
+          text: `\u2014 ${node.attribution}`,
           x: area.x,
           y: area.y + area.h - attrH,
           w: area.w,
-          h: attrH
+          h: attrH,
+          step
         });
       }
       return;
     }
     case "columns": {
-      const cols = node.children.filter((c) => c.type === "column");
+      const cols = node.children;
       if (cols.length === 0)
         return;
-      const totalWeight = cols.reduce((s, c) => s + (c.props.weight ?? 1), 0);
-      const gap = node.props.gap ?? 0.3;
+      const totalWeight = cols.reduce((s, c) => s + (c.weight ?? 1), 0);
+      const gap = node.gap ?? 0.3;
       const totalGap = (cols.length - 1) * gap;
       const usableW = Math.max(0, area.w - totalGap);
       let x = area.x;
       for (const col of cols) {
-        const w = (col.props.weight ?? 1) / totalWeight * usableW;
-        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out);
+        const w = (col.weight ?? 1) / totalWeight * usableW;
+        const colStep = col.step ?? step;
+        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out, constStep(colStep), colStep);
         x += w + gap;
       }
       return;
     }
-    case "column":
-      layoutVertical(node.children, area, out);
+    case "group": {
+      const explicit = typeof node.step === "number";
+      const stepFor = explicit ? constStep(step) : (i) => i + 1;
+      layoutVertical(node.children, area, out, stepFor, step);
       return;
-    case "fragment":
-      layoutVertical(node.children, area, out);
-      return;
-    default:
-      return;
+    }
   }
 }
-function extractText(node) {
-  if (node.type === "text")
-    return String(node.props.value ?? "");
-  return node.children.map(extractText).join("");
-}
 
-// src/render/html.ts
+// src/html.ts
 var SCALE = 80;
-function renderHtml(slides) {
-  const slidesHtml = layoutDeck(slides).map((placed, i) => {
+function renderHtml(deck) {
+  const slidesHtml = layoutDeck(deck).map((placed, i) => {
     const items = placed.map(placedToHtml).join(`
 `);
-    return `<section class="slide" data-index="${i}">${items}</section>`;
+    const maxStep = placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
+    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}">${items}<div class="step-badge"></div></section>`;
   }).join(`
 `);
   return `<!doctype html>
@@ -2225,7 +2203,10 @@ function renderHtml(slides) {
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     color: #111;
     overflow: hidden;
+    outline: 2px solid transparent;
+    transition: outline-color 0.15s;
   }
+  .slide.focused { outline-color: #4a9eff; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
   .role-subtitle { font-size: 22px; color: #555; justify-content: center; }
@@ -2236,27 +2217,94 @@ function renderHtml(slides) {
   .bullets { font-size: 18px; padding-left: 1.2em; margin: 0; list-style: disc; }
   .bullets li { margin: 0 0 6px 0; }
   img.placed { object-fit: contain; }
+  .stepped-hidden { visibility: hidden; }
+  .step-badge {
+    position: absolute; right: 8px; bottom: 8px;
+    font: 11px/1 ui-monospace, monospace;
+    color: #888; background: rgba(255,255,255,0.85);
+    padding: 3px 6px; border-radius: 3px;
+    pointer-events: none;
+  }
+  .slide[data-max-step="0"] .step-badge { display: none; }
 </style>
 </head>
 <body>
 ${slidesHtml}
 <script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let focused = slides[0] ?? null;
+
+  function applySteps(slide) {
+    const cur = +slide.dataset.currentStep;
+    slide.querySelectorAll('[data-step]').forEach((el) => {
+      const st = +el.dataset.step;
+      el.classList.toggle('stepped-hidden', st > cur);
+    });
+    const max = +slide.dataset.maxStep;
+    const badge = slide.querySelector('.step-badge');
+    if (badge) badge.textContent = max > 0 ? ('step ' + cur + ' / ' + max) : '';
+  }
+
+  function setFocused(s) {
+    if (focused) focused.classList.remove('focused');
+    focused = s;
+    if (focused) focused.classList.add('focused');
+  }
+
+  slides.forEach((s) => {
+    s.addEventListener('click', () => setFocused(s));
+    applySteps(s);
+  });
+  if (focused) focused.classList.add('focused');
+
+  document.addEventListener('keydown', (e) => {
+    if (!focused) return;
+    if (e.key === 'ArrowRight') {
+      const cur = +focused.dataset.currentStep;
+      const max = +focused.dataset.maxStep;
+      if (cur < max) {
+        focused.dataset.currentStep = String(cur + 1);
+        applySteps(focused);
+        e.preventDefault();
+      }
+    } else if (e.key === 'ArrowLeft') {
+      const cur = +focused.dataset.currentStep;
+      if (cur > 0) {
+        focused.dataset.currentStep = String(cur - 1);
+        applySteps(focused);
+        e.preventDefault();
+      }
+    } else if (e.key === '0') {
+      focused.dataset.currentStep = '0';
+      applySteps(focused);
+    } else if (e.key === 'End') {
+      focused.dataset.currentStep = focused.dataset.maxStep;
+      applySteps(focused);
+    }
+  });
+
   const sse = new EventSource("/sse");
   sse.onmessage = (e) => { if (e.data === "reload") location.reload(); };
 </script>
 </body>
 </html>`;
 }
+function maxStepOf(p) {
+  if (p.kind === "bullets") {
+    return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
+  }
+  return p.step;
+}
 function placedToHtml(p) {
   const inset = `left:${p.x * SCALE}px;top:${p.y * SCALE}px;width:${p.w * SCALE}px;height:${p.h * SCALE}px`;
   if (p.kind === "image") {
-    return `<img class="placed" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
+    return `<img class="placed" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
   }
   if (p.kind === "bullets") {
-    const lis = p.bullets.map((b) => `<li>${escapeText(b)}</li>`).join("");
-    return `<ul class="placed bullets" style="${inset}">${lis}</ul>`;
+    const lis = p.bullets.map((b) => `<li data-step="${b.step}">${escapeText(b.text)}</li>`).join("");
+    return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
   }
-  return `<div class="placed role-${p.role}" style="${inset}">${escapeText(p.text)}</div>`;
+  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}">${escapeText(p.text)}</div>`;
 }
 function escapeText(s) {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
@@ -2265,11 +2313,409 @@ function escapeAttr(s) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 
-// src/commands/dev.ts
-async function devCommand(options) {
-  const entry = resolve2(process.cwd(), options.entry);
+// src/load.ts
+import { pathToFileURL } from "url";
+async function loadDeck(entry) {
+  const url = pathToFileURL(entry).href + `?t=${Date.now()}`;
+  const mod = await import(url);
+  const deckFn = mod.default;
+  if (typeof deckFn !== "function") {
+    throw new Error(`deck entry must default-export a function returning Slide[]: ${entry}`);
+  }
+  const result = await deckFn();
+  if (!Array.isArray(result)) {
+    throw new Error(`deck function must return an array of <Slide> elements`);
+  }
+  for (const s of result) {
+    if (!s || typeof s !== "object" || s.kind !== "slide") {
+      throw new Error("deck array must contain only <Slide> elements");
+    }
+  }
+  return result;
+}
+
+// src/slides_client.ts
+import { google as google2 } from "googleapis";
+async function getClients() {
+  const auth = await getAuthedClient();
+  return {
+    auth,
+    slides: google2.slides({ version: "v1", auth }),
+    drive: google2.drive({ version: "v3", auth })
+  };
+}
+function parsePresentationId(input) {
+  const m = /\/presentation\/d\/([a-zA-Z0-9_-]+)/.exec(input);
+  if (m)
+    return m[1];
+  return input;
+}
+function presentationUrl(id) {
+  return `https://docs.google.com/presentation/d/${id}/edit`;
+}
+
+// src/slides_reader.ts
+function presentationToDeck(p) {
+  const slides = p.slides ?? [];
+  return slides.map(slideToNode);
+}
+function slideToNode(slide) {
+  const elements = (slide.pageElements ?? []).slice().sort((a, b) => yOf(a) - yOf(b));
+  const children = [];
+  for (const el of elements) {
+    const child = elementToChild(el);
+    if (child)
+      children.push(child);
+  }
+  return { kind: "slide", children };
+}
+function yOf(el) {
+  return el.transform?.translateY ?? 0;
+}
+function elementToChild(el) {
+  if (el.image?.contentUrl || el.image?.sourceUrl) {
+    const node = {
+      kind: "image",
+      src: el.image.sourceUrl ?? el.image.contentUrl ?? ""
+    };
+    return node;
+  }
+  if (!el.shape?.text)
+    return null;
+  const paragraphs = parseParagraphs(el.shape.text);
+  if (paragraphs.length === 0)
+    return null;
+  const allBullets = paragraphs.every((p) => p.bullet);
+  if (allBullets && paragraphs.length > 0) {
+    const bullets = paragraphs.map((p) => ({ kind: "bullet", text: p.text }));
+    const node = { kind: "bullets", children: bullets };
+    return node;
+  }
+  const text = paragraphs.map((p) => p.text).join(`
+`);
+  if (!text.trim())
+    return null;
+  const style = paragraphs[0].style;
+  const role = classifyText(style);
+  switch (role) {
+    case "title":
+      return { kind: "title", text };
+    case "subtitle":
+      return { kind: "subtitle", text };
+    case "heading":
+      return { kind: "heading", text };
+    case "quote":
+      return { kind: "quote", text };
+    default:
+      return { kind: "text", text };
+  }
+}
+function parseParagraphs(text) {
+  const elements = text.textElements ?? [];
+  const paragraphs = [];
+  let current = { text: "", bullet: false, style: {} };
+  for (const e of elements) {
+    if (e.paragraphMarker) {
+      current.bullet = !!e.paragraphMarker.bullet;
+    } else if (e.textRun) {
+      const content = e.textRun.content ?? "";
+      const style = e.textRun.style;
+      if (style && Object.keys(current.style).length === 0) {
+        if (style.fontSize?.magnitude)
+          current.style.fontSize = style.fontSize.magnitude;
+        if (style.bold)
+          current.style.bold = true;
+        if (style.italic)
+          current.style.italic = true;
+      }
+      const lines = content.split(`
+`);
+      lines.forEach((line, i) => {
+        current.text += line;
+        if (i < lines.length - 1) {
+          paragraphs.push(current);
+          current = { text: "", bullet: current.bullet, style: {} };
+        }
+      });
+    }
+  }
+  if (current.text.length > 0)
+    paragraphs.push(current);
+  return paragraphs.filter((p) => p.text.length > 0);
+}
+function classifyText(style) {
+  const size = style.fontSize ?? 14;
+  if (style.italic && size >= 18)
+    return "quote";
+  if (style.bold && size >= 30)
+    return "title";
+  if (style.bold)
+    return "heading";
+  if (size >= 20)
+    return "subtitle";
+  return "text";
+}
+function deckToTsx(deck) {
+  const used = new Set(["Slide"]);
+  const slidesSrc = deck.map((s) => renderSlide(s, used)).join(`,
+    `);
+  const imports = Array.from(used).sort().join(", ");
+  return `import { ${imports} } from "slidekick";
+
+export default function deck() {
+  return [
+    ${slidesSrc},
+  ];
+}
+`;
+}
+function renderSlide(slide, used) {
+  const body = slide.children.map((c) => renderChild(c, used, "      ")).join(`
+`);
+  return `<Slide>
+${body}
+    </Slide>`;
+}
+function renderChild(node, used, indent) {
+  switch (node.kind) {
+    case "title":
+      used.add("Title");
+      return `${indent}<Title>${escapeJsxText(node.text)}</Title>`;
+    case "subtitle":
+      used.add("Subtitle");
+      return `${indent}<Subtitle>${escapeJsxText(node.text)}</Subtitle>`;
+    case "heading":
+      used.add("Heading");
+      return `${indent}<Heading>${escapeJsxText(node.text)}</Heading>`;
+    case "text":
+      used.add("Text");
+      return `${indent}<Text>${escapeJsxText(node.text)}</Text>`;
+    case "quote": {
+      used.add("Quote");
+      const attr = node.attribution ? ` attribution=${JSON.stringify(node.attribution)}` : "";
+      return `${indent}<Quote${attr}>${escapeJsxText(node.text)}</Quote>`;
+    }
+    case "image": {
+      used.add("Image");
+      const alt = node.alt ? ` alt=${JSON.stringify(node.alt)}` : "";
+      return `${indent}<Image src=${JSON.stringify(node.src)}${alt} />`;
+    }
+    case "bullets": {
+      used.add("Bullets");
+      used.add("Bullet");
+      const items = node.children.map((b) => `${indent}  <Bullet>${escapeJsxText(b.text)}</Bullet>`).join(`
+`);
+      return `${indent}<Bullets>
+${items}
+${indent}</Bullets>`;
+    }
+    case "columns": {
+      used.add("Columns");
+      used.add("Column");
+      const cols = node.children.map((c) => {
+        const inner = c.children.map((cc) => renderChild(cc, used, `${indent}    `)).join(`
+`);
+        const w = c.weight ? ` weight={${c.weight}}` : "";
+        return `${indent}  <Column${w}>
+${inner}
+${indent}  </Column>`;
+      }).join(`
+`);
+      return `${indent}<Columns>
+${cols}
+${indent}</Columns>`;
+    }
+    case "group": {
+      used.add("Group");
+      const inner = node.children.map((c) => renderChild(c, used, `${indent}  `)).join(`
+`);
+      return `${indent}<Group>
+${inner}
+${indent}</Group>`;
+    }
+  }
+}
+function escapeJsxText(s) {
+  return s.replace(/[{}<>]/g, (c) => `{${JSON.stringify(c)}}`);
+}
+
+// src/slides_writer.ts
+var DEFAULT_PAGE = { widthPt: SLIDE_W * 72, heightPt: SLIDE_H * 72 };
+var ROLE_STYLE = {
+  title: { fontSize: 36, bold: true },
+  subtitle: { fontSize: 22 },
+  heading: { fontSize: 22, bold: true },
+  text: { fontSize: 16 },
+  quote: { fontSize: 22, italic: true, alignment: "CENTER" },
+  attribution: { fontSize: 14, alignment: "CENTER" }
+};
+var BULLETS_STYLE = { fontSize: 18 };
+function deckToRequests(deck, opts = {}) {
+  const page = opts.page ?? DEFAULT_PAGE;
+  const sx = page.widthPt / SLIDE_W;
+  const sy = page.heightPt / SLIDE_H;
+  const placed = layoutDeck(deck);
+  const requests = [];
+  placed.forEach((slidePlaced, slideIdx) => {
+    const slideId = `sk_s_${slideIdx}`;
+    requests.push({
+      createSlide: {
+        objectId: slideId,
+        slideLayoutReference: { predefinedLayout: "BLANK" }
+      }
+    });
+    slidePlaced.forEach((p, i) => {
+      const elementId = `sk_e_${slideIdx}_${i}`;
+      const x = p.x * sx;
+      const y = p.y * sy;
+      const w = p.w * sx;
+      const h = p.h * sy;
+      emitElement(requests, slideId, elementId, p, x, y, w, h);
+    });
+  });
+  return requests;
+}
+function emitElement(out, slideId, elementId, p, x, y, w, h) {
+  const elementProperties = {
+    pageObjectId: slideId,
+    size: {
+      width: { magnitude: w, unit: "PT" },
+      height: { magnitude: h, unit: "PT" }
+    },
+    transform: { scaleX: 1, scaleY: 1, translateX: x, translateY: y, unit: "PT" }
+  };
+  if (p.kind === "image") {
+    out.push({ createImage: { objectId: elementId, url: p.src, elementProperties } });
+    return;
+  }
+  out.push({
+    createShape: { objectId: elementId, shapeType: "TEXT_BOX", elementProperties }
+  });
+  if (p.kind === "text") {
+    if (p.text.length > 0) {
+      out.push({ insertText: { objectId: elementId, text: p.text, insertionIndex: 0 } });
+      applyStyle(out, elementId, ROLE_STYLE[p.role], p.text.length);
+    }
+    return;
+  }
+  const text = p.bullets.map((b) => b.text).join(`
+`);
+  if (text.length === 0)
+    return;
+  out.push({ insertText: { objectId: elementId, text, insertionIndex: 0 } });
+  applyStyle(out, elementId, BULLETS_STYLE, text.length);
+  out.push({
+    createParagraphBullets: {
+      objectId: elementId,
+      textRange: { type: "ALL" },
+      bulletPreset: "BULLET_DISC_CIRCLE_SQUARE"
+    }
+  });
+}
+function applyStyle(out, objectId, style, textLength) {
+  if (textLength === 0)
+    return;
+  const fields = ["fontSize"];
+  const textStyle = {
+    fontSize: { magnitude: style.fontSize, unit: "PT" }
+  };
+  if (style.bold) {
+    textStyle.bold = true;
+    fields.push("bold");
+  }
+  if (style.italic) {
+    textStyle.italic = true;
+    fields.push("italic");
+  }
+  out.push({
+    updateTextStyle: {
+      objectId,
+      style: textStyle,
+      fields: fields.join(","),
+      textRange: { type: "ALL" }
+    }
+  });
+  if (style.alignment) {
+    out.push({
+      updateParagraphStyle: {
+        objectId,
+        style: { alignment: style.alignment },
+        fields: "alignment",
+        textRange: { type: "ALL" }
+      }
+    });
+  }
+}
+function deleteAllSlidesRequests(presentation) {
+  const slides = presentation.slides ?? [];
+  return slides.map((s) => s.objectId).filter((id) => typeof id === "string").map((objectId) => ({ deleteObject: { objectId } }));
+}
+function presentationPageDims(p) {
+  const size = p.pageSize;
+  const w = size?.width;
+  const h = size?.height;
+  if (!w?.magnitude || !h?.magnitude)
+    return DEFAULT_PAGE;
+  const widthPt = toPt(w.magnitude, w.unit ?? "EMU");
+  const heightPt = toPt(h.magnitude, h.unit ?? "EMU");
+  return { widthPt, heightPt };
+}
+function toPt(magnitude, unit) {
+  if (unit === "PT")
+    return magnitude;
+  if (unit === "EMU")
+    return magnitude / 12700;
+  return magnitude;
+}
+
+// src/cli.ts
+var program2 = new Command;
+program2.name("slidekick").description("Author Google Slides decks as TSX. Push and pull from real presentations.").version("0.1.0");
+var auth = program2.command("auth").description("Authentication");
+auth.command("login").description("Run the OAuth flow and cache credentials").action(async () => {
+  try {
+    await login();
+  } catch (e) {
+    console.error(`Auth failed: ${e.message}
+`);
+    console.error(missingScopeHelp());
+    process.exit(1);
+  }
+});
+auth.command("status").description("Show whether credentials are cached").action(async () => {
+  try {
+    await getClients();
+    console.log(`Authenticated. Token cached at ${tokenPath()}.`);
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+});
+program2.command("init").description("Scaffold a new slidekick deck project").argument("[dir]", "directory to create (defaults to current dir)").action(async (dir) => {
+  const target = resolve(process.cwd(), dir ?? ".");
+  await mkdir2(target, { recursive: true });
+  const deckPath = join2(target, "deck.tsx");
+  if (await fileExists(deckPath)) {
+    console.error(`refusing to overwrite existing deck.tsx in ${target}`);
+    process.exit(1);
+  }
+  await writeFile2(deckPath, STARTER_DECK);
+  await writeFile2(join2(target, "tsconfig.json"), STARTER_TSCONFIG);
+  await writeFile2(join2(target, "package.json"), starterPackageJson(basename(target)));
+  await writeFile2(join2(target, ".gitignore"), STARTER_GITIGNORE);
+  console.log(`scaffolded slidekick deck in ${target}`);
+  console.log("");
+  console.log("next:");
+  console.log(`  cd ${dir ?? "."}`);
+  console.log("  bun install");
+  console.log("  slidekick auth login");
+  console.log("  slidekick dev                            # local preview");
+  console.log('  slidekick new deck.tsx --title "My Deck" # create on Slides');
+});
+program2.command("dev").description("Start a local HTML preview while editing").option("-p, --port <port>", "port to serve on", "5179").option("-e, --entry <entry>", "deck entry file", "deck.tsx").action(async (options) => {
+  const entry = resolve(process.cwd(), options.entry);
   const port = Number(options.port);
-  if (!await fileExists2(entry)) {
+  if (!await fileExists(entry)) {
     console.error(`deck entry not found: ${entry}`);
     console.error(`run \`slidekick init\` first, or pass --entry`);
     process.exit(1);
@@ -2291,9 +2737,8 @@ async function devCommand(options) {
         });
       }
       try {
-        const slides = await loadDeck(entry);
-        const html = renderHtml(slides);
-        return new Response(html, {
+        const deck = await loadDeck(entry);
+        return new Response(renderHtml(deck), {
           headers: { "content-type": "text/html; charset=utf-8" }
         });
       } catch (err) {
@@ -2305,7 +2750,7 @@ async function devCommand(options) {
       }
     }
   });
-  const watchDir = dirname(entry);
+  const watchDir = dirname2(entry);
   watch(watchDir, { recursive: true }, () => {
     const data = encoder.encode(`data: reload
 
@@ -2320,6 +2765,81 @@ async function devCommand(options) {
   });
   console.log(`slidekick dev: ${server.url.href}`);
   console.log(`watching ${watchDir}`);
+});
+program2.command("new").description("Create a new Google Slides presentation from a deck file").argument("<entry>", "deck entry file").requiredOption("--title <title>", "title for the new presentation").action(async (entry, opts) => {
+  const entryPath = resolve(process.cwd(), entry);
+  const deck = await loadDeck(entryPath);
+  const { slides } = await getClients();
+  const created = await slides.presentations.create({
+    requestBody: {
+      title: opts.title,
+      pageSize: {
+        width: { magnitude: 12192000, unit: "EMU" },
+        height: { magnitude: 6858000, unit: "EMU" }
+      }
+    }
+  });
+  const id = created.data.presentationId;
+  if (!id)
+    throw new Error("Failed to create presentation");
+  const deletes = deleteAllSlidesRequests(created.data);
+  const writes = deckToRequests(deck, { page: presentationPageDims(created.data) });
+  await slides.presentations.batchUpdate({
+    presentationId: id,
+    requestBody: { requests: [...deletes, ...writes] }
+  });
+  console.log(`${presentationUrl(id)}  (${opts.title})`);
+});
+program2.command("push").description("Overwrite an existing Google Slides deck").argument("<entry>", "deck entry file").requiredOption("--id <id>", "target presentation ID or URL").option("--dry-run", "print the batchUpdate requests, don't send").action(async (entry, opts) => {
+  const entryPath = resolve(process.cwd(), entry);
+  const deck = await loadDeck(entryPath);
+  const id = parsePresentationId(opts.id);
+  if (opts.dryRun) {
+    const reqs = deckToRequests(deck);
+    console.log(JSON.stringify(reqs, null, 2));
+    return;
+  }
+  const { slides } = await getClients();
+  const existing = await slides.presentations.get({ presentationId: id });
+  const deletes = deleteAllSlidesRequests(existing.data);
+  const writes = deckToRequests(deck, { page: presentationPageDims(existing.data) });
+  await slides.presentations.batchUpdate({
+    presentationId: id,
+    requestBody: { requests: [...deletes, ...writes] }
+  });
+  console.error(`Pushed ${entry} to ${presentationUrl(id)}`);
+});
+program2.command("pull").description("Download a Google Slides deck and convert to TSX").argument("<idOrUrl>", "presentation ID or URL").option("-o, --output <file>", "write to file instead of stdout").action(async (input, opts) => {
+  const id = parsePresentationId(input);
+  const { slides } = await getClients();
+  const res = await slides.presentations.get({ presentationId: id });
+  const deck = presentationToDeck(res.data);
+  const tsx = deckToTsx(deck);
+  if (opts.output) {
+    await writeFile2(opts.output, tsx);
+    console.error(`Wrote ${opts.output}`);
+  } else {
+    process.stdout.write(tsx);
+  }
+});
+program2.command("agent").description("Print agent-friendly instructions for authoring a deck").action(() => {
+  process.stdout.write(AGENT_INSTRUCTIONS);
+});
+program2.parseAsync(process.argv).catch((e) => {
+  console.error(`Error: ${e.message}`);
+  if (/insufficient|invalid_scope|forbidden/i.test(e.message)) {
+    console.error(`
+${missingScopeHelp()}`);
+  }
+  process.exit(1);
+});
+async function fileExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 function makeSseStream(controllers, encoder) {
   let registered = null;
@@ -2344,114 +2864,55 @@ function errorPage(stack) {
 <script>const sse=new EventSource("/sse");sse.onmessage=(e)=>{if(e.data==="reload")location.reload();};</script>
 </body></html>`;
 }
-async function fileExists2(path) {
-  try {
-    await access2(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
+var STARTER_DECK = `import { Slide, Title, Subtitle, Bullets, Bullet } from "slidekick";
 
-// src/commands/build.ts
-import { resolve as resolve3, dirname as dirname2 } from "path";
-import { access as access3, mkdir as mkdir2 } from "fs/promises";
-
-// src/render/pptx.ts
-import pptxgen from "pptxgenjs";
-var PptxCtor = pptxgen;
-async function renderPptx(slides, outPath) {
-  const pptx = new PptxCtor;
-  pptx.layout = "LAYOUT_WIDE";
-  pptx.title = "slidekick deck";
-  for (const placed of layoutDeck(slides)) {
-    const slide = pptx.addSlide();
-    for (const p of placed) {
-      drawPlaced(slide, p);
-    }
-  }
-  await pptx.writeFile({ fileName: outPath });
+export default function deck() {
+  return [
+    <Slide>
+      <Title>Hello, slidekick</Title>
+      <Subtitle>Author decks as TSX. Push to Google Slides.</Subtitle>
+    </Slide>,
+    <Slide>
+      <Title>Why slidekick</Title>
+      <Bullets>
+        <Bullet>Slides are code, diffable and reviewable</Bullet>
+        <Bullet>An AI sidekick can author and revise them</Bullet>
+        <Bullet>Pushed to a real Google Slides deck \u2014 fully editable</Bullet>
+      </Bullets>
+    </Slide>,
+  ];
 }
-function drawPlaced(slide, p) {
-  if (p.kind === "image") {
-    slide.addImage({
-      path: p.src,
-      x: p.x,
-      y: p.y,
-      w: p.w,
-      h: p.h,
-      sizing: { type: "contain", w: p.w, h: p.h }
-    });
-    return;
-  }
-  if (p.kind === "bullets") {
-    const items = p.bullets.map((b) => ({ text: b, options: { bullet: true } }));
-    slide.addText(items, {
-      x: p.x,
-      y: p.y,
-      w: p.w,
-      h: p.h,
-      fontSize: 18,
-      valign: "top",
-      color: "222222"
-    });
-    return;
-  }
-  slide.addText(p.text, {
-    x: p.x,
-    y: p.y,
-    w: p.w,
-    h: p.h,
-    ...textStyle(p.role)
-  });
+`;
+var STARTER_TSCONFIG = `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "jsxImportSource": "slidekick",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
 }
-function textStyle(role) {
-  switch (role) {
-    case "title":
-      return { fontSize: 40, bold: true, valign: "middle", color: "111111" };
-    case "subtitle":
-      return { fontSize: 22, valign: "middle", color: "555555" };
-    case "heading":
-      return { fontSize: 24, bold: true, valign: "middle", color: "222222" };
-    case "text":
-      return { fontSize: 16, valign: "top", color: "222222" };
-    case "quote":
-      return { fontSize: 24, italic: true, align: "center", valign: "middle", color: "333333" };
-    case "attribution":
-      return { fontSize: 16, align: "center", valign: "middle", color: "666666" };
+`;
+function starterPackageJson(name) {
+  const safeName = name.replace(/[^a-z0-9-_]/gi, "-").toLowerCase() || "deck";
+  return `{
+  "name": "${safeName}",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "slidekick dev"
+  },
+  "dependencies": {
+    "slidekick": "github:bhirsch42/slidekick"
   }
 }
-
-// src/commands/build.ts
-async function buildCommand(options) {
-  const entry = resolve3(process.cwd(), options.entry);
-  const out = resolve3(process.cwd(), options.out);
-  if (!await fileExists3(entry)) {
-    console.error(`deck entry not found: ${entry}`);
-    console.error(`run \`slidekick init\` first, or pass --entry`);
-    process.exit(1);
-  }
-  await mkdir2(dirname2(out), { recursive: true });
-  console.log(`loading ${entry}`);
-  const slides = await loadDeck(entry);
-  console.log(`rendering ${slides.length} slide${slides.length === 1 ? "" : "s"}`);
-  await renderPptx(slides, out);
-  console.log(`wrote ${out}`);
+`;
 }
-async function fileExists3(path) {
-  try {
-    await access3(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// src/cli.ts
-var program2 = new Command;
-program2.name("slidekick").description("Author slide decks as TSX with an AI sidekick. Renders to .pptx.").version("0.0.1");
-program2.command("init").description("Scaffold a new slidekick deck project").argument("[dir]", "directory to create (defaults to current dir)").action(initCommand);
-program2.command("agent").description("Print agent-friendly instructions for authoring a deck").action(agentCommand);
-program2.command("dev").description("Start a live-preview server while editing slides").option("-p, --port <port>", "port to serve on", "5179").option("-e, --entry <entry>", "deck entry file", "deck.tsx").action(devCommand);
-program2.command("build").description("Render the deck to a .pptx file").option("-e, --entry <entry>", "deck entry file", "deck.tsx").option("-o, --out <out>", "output .pptx path", "out/deck.pptx").action(buildCommand);
-program2.parseAsync(process.argv);
+var STARTER_GITIGNORE = `node_modules
+.DS_Store
+`;

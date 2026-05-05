@@ -12,7 +12,7 @@ const result = await Bun.build({
   entrypoints: ["src/cli.ts"],
   outdir: "dist",
   target: "bun",
-  external: ["pptxgenjs"],
+  external: ["googleapis"],
 });
 
 if (!result.success) {

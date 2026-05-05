@@ -1,7 +1,7 @@
 {
   "name": "slidekick",
-  "version": "0.0.1",
-  "description": "Author slide decks as TSX with an AI sidekick. Renders to .pptx.",
+  "version": "0.1.0",
+  "description": "Author Google Slides decks as TSX. Push and pull from real Slides presentations.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -30,11 +30,12 @@
     "dev": "bun run --watch src/cli.ts",
     "slidekick": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test tests/",
     "prepare": "bun run build"
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "pptxgenjs": "^3.12.0"
+    "googleapis": "^144.0.0"
   },
   "devDependencies": {
     "@types/bun": "^1.1.13",

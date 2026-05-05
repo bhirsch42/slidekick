@@ -1,57 +1,86 @@
-export interface Node {
-  type: string;
-  props: Record<string, unknown>;
-  children: Node[];
+export interface Stepped {
+  step?: number;
 }
 
-export type Children = Node | Node[] | string | number | boolean | null | undefined;
-
-export interface SlideProps {
-  children?: Children;
+export interface SlideNode extends Stepped {
+  kind: "slide";
+  children: SlideChild[];
 }
 
-export interface ColumnsProps {
-  children?: Children;
+export interface ColumnsNode extends Stepped {
+  kind: "columns";
   gap?: number;
+  children: ColumnNode[];
 }
 
-export interface ColumnProps {
-  children?: Children;
+export interface ColumnNode extends Stepped {
+  kind: "column";
   weight?: number;
+  children: SlideChild[];
 }
 
-export interface TitleProps {
-  children?: Children;
+export interface TitleNode extends Stepped {
+  kind: "title";
+  text: string;
 }
 
-export interface SubtitleProps {
-  children?: Children;
+export interface SubtitleNode extends Stepped {
+  kind: "subtitle";
+  text: string;
 }
 
-export interface HeadingProps {
-  children?: Children;
+export interface HeadingNode extends Stepped {
+  kind: "heading";
+  text: string;
 }
 
-export interface BulletsProps {
-  children?: Children;
+export interface BulletsNode extends Stepped {
+  kind: "bullets";
+  children: BulletNode[];
 }
 
-export interface BulletProps {
-  children?: Children;
+export interface BulletNode extends Stepped {
+  kind: "bullet";
+  text: string;
 }
 
-export interface TextProps {
-  children?: Children;
+export interface TextNode extends Stepped {
+  kind: "text";
+  text: string;
 }
 
-export interface ImageProps {
+export interface ImageNode extends Stepped {
+  kind: "image";
   src: string;
   alt?: string;
 }
 
-export interface QuoteProps {
-  children?: Children;
+export interface QuoteNode extends Stepped {
+  kind: "quote";
+  text: string;
   attribution?: string;
 }
 
-export type Deck = Node[];
+export interface GroupNode extends Stepped {
+  kind: "group";
+  children: SlideChild[];
+}
+
+export type SlideChild =
+  | TitleNode
+  | SubtitleNode
+  | HeadingNode
+  | BulletsNode
+  | TextNode
+  | ImageNode
+  | QuoteNode
+  | ColumnsNode
+  | GroupNode;
+
+export type Node = SlideNode | SlideChild | BulletNode | ColumnNode;
+
+export type Deck = SlideNode[];
+
+export type Children<T> = T | T[];
+
+export type TextChildren = string | number | (string | number)[];
