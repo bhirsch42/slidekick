@@ -12,6 +12,7 @@ import type {
   TextProps,
   ImageProps,
   QuoteProps,
+  GroupProps,
 } from "./types.js";
 
 export const Slide = (props: SlideProps): Node => makeNode("slide", props);
@@ -25,3 +26,4 @@ export const Bullet = (props: BulletProps): Node => makeNode("bullet", props);
 export const Text = (props: TextProps): Node => makeNode("text", props);
 export const Image = (props: ImageProps): Node => makeNode("image", props);
 export const Quote = (props: QuoteProps): Node => makeNode("quote", props);
+export const Group = (props: GroupProps): Node => makeNode("group", props);

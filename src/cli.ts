@@ -35,6 +35,8 @@ program
   .description("Render the deck to a .pptx file")
   .option("-e, --entry <entry>", "deck entry file", "deck.tsx")
   .option("-o, --out <out>", "output .pptx path", "out/deck.pptx")
+  .option("--image-mode", "render each slide step as a full-bleed image (portable, uneditable)")
+  .option("--image-width <px>", "image width in pixels for --image-mode", "1920")
   .action(buildCommand);
 
 program.parseAsync(process.argv);

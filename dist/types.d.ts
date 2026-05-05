@@ -4,41 +4,47 @@ export interface Node {
     children: Node[];
 }
 export type Children = Node | Node[] | string | number | boolean | null | undefined;
-export interface SlideProps {
+export interface Stepped {
+    step?: number;
+}
+export interface SlideProps extends Stepped {
     children?: Children;
 }
-export interface ColumnsProps {
+export interface ColumnsProps extends Stepped {
     children?: Children;
     gap?: number;
 }
-export interface ColumnProps {
+export interface ColumnProps extends Stepped {
     children?: Children;
     weight?: number;
 }
-export interface TitleProps {
+export interface TitleProps extends Stepped {
     children?: Children;
 }
-export interface SubtitleProps {
+export interface SubtitleProps extends Stepped {
     children?: Children;
 }
-export interface HeadingProps {
+export interface HeadingProps extends Stepped {
     children?: Children;
 }
-export interface BulletsProps {
+export interface BulletsProps extends Stepped {
     children?: Children;
 }
-export interface BulletProps {
+export interface BulletProps extends Stepped {
     children?: Children;
 }
-export interface TextProps {
+export interface TextProps extends Stepped {
     children?: Children;
 }
-export interface ImageProps {
+export interface ImageProps extends Stepped {
     src: string;
     alt?: string;
 }
-export interface QuoteProps {
+export interface QuoteProps extends Stepped {
     children?: Children;
     attribution?: string;
+}
+export interface GroupProps extends Stepped {
+    children?: Children;
 }
 export type Deck = Node[];

@@ -26,7 +26,7 @@ function drawPlaced(slide, p) {
         return;
     }
     if (p.kind === "bullets") {
-        const items = p.bullets.map((b) => ({ text: b, options: { bullet: true } }));
+        const items = p.bullets.map((b) => ({ text: b.text, options: { bullet: true } }));
         slide.addText(items, {
             x: p.x,
             y: p.y,

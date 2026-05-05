@@ -10,11 +10,13 @@ export {
   Text,
   Image,
   Quote,
+  Group,
 } from "./components.js";
 
 export type {
   Node,
   Children,
+  Stepped,
   SlideProps,
   ColumnsProps,
   ColumnProps,
@@ -26,6 +28,7 @@ export type {
   TextProps,
   ImageProps,
   QuoteProps,
+  GroupProps,
   Deck,
 } from "./types.js";
 

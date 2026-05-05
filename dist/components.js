@@ -10,4 +10,5 @@ export const Bullet = (props) => makeNode("bullet", props);
 export const Text = (props) => makeNode("text", props);
 export const Image = (props) => makeNode("image", props);
 export const Quote = (props) => makeNode("quote", props);
+export const Group = (props) => makeNode("group", props);
 //# sourceMappingURL=components.js.map

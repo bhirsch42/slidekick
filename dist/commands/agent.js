@@ -47,6 +47,39 @@ Content:
 - <Text>           a paragraph or short prose.
 - <Image src>      an image. src is a path or URL.
 - <Quote attribution?>  a pull quote, optionally attributed.
+- <Group>          layout-transparent container that auto-numbers
+                   reveal steps for its direct children.
+
+## Progressive reveal
+
+Every component accepts an optional \`step\` prop (number). In the live
+preview, only elements with \`step <= currentStep\` are visible; arrow
+keys advance the step. In .pptx output, all steps are composed (static).
+
+- step on a <Bullet>: that bullet appears at the given step.
+- step on <Bullets>: the whole list appears at that step (children
+  inherit unless they set their own).
+- <Group> with no step: assigns 1, 2, 3… to its direct children in
+  source order. Use this for the common "reveal one at a time" case.
+- <Group step={N}>: groups its children at step N (no auto-numbering).
+
+Examples:
+
+\`\`\`tsx
+// reveal bullets one at a time
+<Bullets>
+  <Bullet step={1}>First</Bullet>
+  <Bullet step={2}>Second</Bullet>
+  <Bullet step={3}>Third</Bullet>
+</Bullets>
+
+// auto-number a sequence of slide-level blocks
+<Group>
+  <Heading>Setup</Heading>
+  <Text>Then the punchline.</Text>
+  <Image src="chart.png" />
+</Group>
+\`\`\`
 
 ## Composition rules
 

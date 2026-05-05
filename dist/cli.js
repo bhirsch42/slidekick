@@ -2026,6 +2026,39 @@ Content:
 - <Text>           a paragraph or short prose.
 - <Image src>      an image. src is a path or URL.
 - <Quote attribution?>  a pull quote, optionally attributed.
+- <Group>          layout-transparent container that auto-numbers
+                   reveal steps for its direct children.
+
+## Progressive reveal
+
+Every component accepts an optional \`step\` prop (number). In the live
+preview, only elements with \`step <= currentStep\` are visible; arrow
+keys advance the step. In .pptx output, all steps are composed (static).
+
+- step on a <Bullet>: that bullet appears at the given step.
+- step on <Bullets>: the whole list appears at that step (children
+  inherit unless they set their own).
+- <Group> with no step: assigns 1, 2, 3\u2026 to its direct children in
+  source order. Use this for the common "reveal one at a time" case.
+- <Group step={N}>: groups its children at step N (no auto-numbering).
+
+Examples:
+
+\`\`\`tsx
+// reveal bullets one at a time
+<Bullets>
+  <Bullet step={1}>First</Bullet>
+  <Bullet step={2}>Second</Bullet>
+  <Bullet step={3}>Third</Bullet>
+</Bullets>
+
+// auto-number a sequence of slide-level blocks
+<Group>
+  <Heading>Setup</Heading>
+  <Text>Then the punchline.</Text>
+  <Image src="chart.png" />
+</Group>
+\`\`\`
 
 ## Composition rules
 
@@ -2079,14 +2112,20 @@ var GAP = 0.2;
 var TITLE_H = 1;
 var SUBTITLE_H = 0.7;
 var HEADING_H = 0.5;
+var constStep = (s) => () => s;
 function layoutDeck(slides) {
   return slides.map(layoutSlide);
 }
 function layoutSlide(slide) {
   const out = [];
   const area = { x: PAD, y: PAD, w: SLIDE_W - 2 * PAD, h: SLIDE_H - 2 * PAD };
-  layoutVertical(slide.children, area, out);
+  const slideStep = nodeStep(slide, 0);
+  layoutVertical(slide.children, area, out, constStep(slideStep));
   return out;
+}
+function nodeStep(node, inherited) {
+  const s = node.props.step;
+  return typeof s === "number" ? s : inherited;
 }
 function fixedHeight(type) {
   if (type === "title")
@@ -2097,7 +2136,7 @@ function fixedHeight(type) {
     return HEADING_H;
   return null;
 }
-function layoutVertical(children, area, out) {
+function layoutVertical(children, area, out, stepFor) {
   if (children.length === 0)
     return;
   const fixedTotal = children.reduce((s, c) => s + (fixedHeight(c.type) ?? 0), 0);
@@ -2106,40 +2145,48 @@ function layoutVertical(children, area, out) {
   const flexAvailable = Math.max(0, area.h - fixedTotal - totalGaps);
   const flexEach = flexCount > 0 ? flexAvailable / flexCount : 0;
   let y = area.y;
-  for (const child of children) {
+  for (let i = 0;i < children.length; i++) {
+    const child = children[i];
     const h = fixedHeight(child.type) ?? flexEach;
-    layoutNode(child, { x: area.x, y, w: area.w, h }, out);
+    layoutNode(child, { x: area.x, y, w: area.w, h }, out, stepFor(i));
     y += h + GAP;
   }
 }
-function layoutNode(node, area, out) {
+function layoutNode(node, area, out, inheritedStep) {
+  const step = nodeStep(node, inheritedStep);
   switch (node.type) {
     case "title":
-      out.push({ kind: "text", role: "title", text: extractText(node), ...area });
+      out.push({ kind: "text", role: "title", text: extractText(node), ...area, step });
       return;
     case "subtitle":
-      out.push({ kind: "text", role: "subtitle", text: extractText(node), ...area });
+      out.push({ kind: "text", role: "subtitle", text: extractText(node), ...area, step });
       return;
     case "heading":
-      out.push({ kind: "text", role: "heading", text: extractText(node), ...area });
+      out.push({ kind: "text", role: "heading", text: extractText(node), ...area, step });
       return;
     case "text":
-      out.push({ kind: "text", role: "text", text: extractText(node), ...area });
+      out.push({ kind: "text", role: "text", text: extractText(node), ...area, step });
       return;
     case "bullets": {
-      const bullets = node.children.filter((c) => c.type === "bullet").map(extractText);
-      out.push({ kind: "bullets", bullets, ...area });
+      const bullets = node.children.filter((c) => c.type === "bullet").map((c) => ({ text: extractText(c), step: nodeStep(c, step) }));
+      out.push({ kind: "bullets", bullets, ...area, step });
       return;
     }
     case "bullet":
-      out.push({ kind: "bullets", bullets: [extractText(node)], ...area });
+      out.push({
+        kind: "bullets",
+        bullets: [{ text: extractText(node), step }],
+        ...area,
+        step
+      });
       return;
     case "image":
       out.push({
         kind: "image",
         src: String(node.props.src ?? ""),
         alt: node.props.alt,
-        ...area
+        ...area,
+        step
       });
       return;
     case "quote": {
@@ -2152,7 +2199,8 @@ function layoutNode(node, area, out) {
         x: area.x,
         y: area.y,
         w: area.w,
-        h: area.h - attrH
+        h: area.h - attrH,
+        step
       });
       if (attribution) {
         out.push({
@@ -2162,7 +2210,8 @@ function layoutNode(node, area, out) {
           x: area.x,
           y: area.y + area.h - attrH,
           w: area.w,
-          h: attrH
+          h: attrH,
+          step
         });
       }
       return;
@@ -2178,24 +2227,32 @@ function layoutNode(node, area, out) {
       let x = area.x;
       for (const col of cols) {
         const w = (col.props.weight ?? 1) / totalWeight * usableW;
-        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out);
+        const colStep = nodeStep(col, step);
+        layoutVertical(col.children, { x, y: area.y, w, h: area.h }, out, constStep(colStep));
         x += w + gap;
       }
       return;
     }
     case "column":
-      layoutVertical(node.children, area, out);
+      layoutVertical(node.children, area, out, constStep(step));
       return;
+    case "group": {
+      const explicit = typeof node.props.step === "number";
+      const stepFor = explicit ? constStep(step) : (i) => i + 1;
+      layoutVertical(node.children, area, out, stepFor);
+      return;
+    }
     case "fragment":
-      layoutVertical(node.children, area, out);
+      layoutVertical(node.children, area, out, constStep(step));
       return;
     default:
       return;
   }
 }
 function extractText(node) {
-  if (node.type === "text")
+  if (node.type === "text" && "value" in node.props) {
     return String(node.props.value ?? "");
+  }
   return node.children.map(extractText).join("");
 }
 
@@ -2205,7 +2262,8 @@ function renderHtml(slides) {
   const slidesHtml = layoutDeck(slides).map((placed, i) => {
     const items = placed.map(placedToHtml).join(`
 `);
-    return `<section class="slide" data-index="${i}">${items}</section>`;
+    const maxStep = placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
+    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}">${items}<div class="step-badge"></div></section>`;
   }).join(`
 `);
   return `<!doctype html>
@@ -2225,7 +2283,10 @@ function renderHtml(slides) {
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     color: #111;
     overflow: hidden;
+    outline: 2px solid transparent;
+    transition: outline-color 0.15s;
   }
+  .slide.focused { outline-color: #4a9eff; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
   .role-subtitle { font-size: 22px; color: #555; justify-content: center; }
@@ -2236,27 +2297,94 @@ function renderHtml(slides) {
   .bullets { font-size: 18px; padding-left: 1.2em; margin: 0; list-style: disc; }
   .bullets li { margin: 0 0 6px 0; }
   img.placed { object-fit: contain; }
+  .stepped-hidden { visibility: hidden; }
+  .step-badge {
+    position: absolute; right: 8px; bottom: 8px;
+    font: 11px/1 ui-monospace, monospace;
+    color: #888; background: rgba(255,255,255,0.85);
+    padding: 3px 6px; border-radius: 3px;
+    pointer-events: none;
+  }
+  .slide[data-max-step="0"] .step-badge { display: none; }
 </style>
 </head>
 <body>
 ${slidesHtml}
 <script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let focused = slides[0] ?? null;
+
+  function applySteps(slide) {
+    const cur = +slide.dataset.currentStep;
+    slide.querySelectorAll('[data-step]').forEach((el) => {
+      const st = +el.dataset.step;
+      el.classList.toggle('stepped-hidden', st > cur);
+    });
+    const max = +slide.dataset.maxStep;
+    const badge = slide.querySelector('.step-badge');
+    if (badge) badge.textContent = max > 0 ? ('step ' + cur + ' / ' + max) : '';
+  }
+
+  function setFocused(s) {
+    if (focused) focused.classList.remove('focused');
+    focused = s;
+    if (focused) focused.classList.add('focused');
+  }
+
+  slides.forEach((s) => {
+    s.addEventListener('click', () => setFocused(s));
+    applySteps(s);
+  });
+  if (focused) focused.classList.add('focused');
+
+  document.addEventListener('keydown', (e) => {
+    if (!focused) return;
+    if (e.key === 'ArrowRight') {
+      const cur = +focused.dataset.currentStep;
+      const max = +focused.dataset.maxStep;
+      if (cur < max) {
+        focused.dataset.currentStep = String(cur + 1);
+        applySteps(focused);
+        e.preventDefault();
+      }
+    } else if (e.key === 'ArrowLeft') {
+      const cur = +focused.dataset.currentStep;
+      if (cur > 0) {
+        focused.dataset.currentStep = String(cur - 1);
+        applySteps(focused);
+        e.preventDefault();
+      }
+    } else if (e.key === '0') {
+      focused.dataset.currentStep = '0';
+      applySteps(focused);
+    } else if (e.key === 'End') {
+      focused.dataset.currentStep = focused.dataset.maxStep;
+      applySteps(focused);
+    }
+  });
+
   const sse = new EventSource("/sse");
   sse.onmessage = (e) => { if (e.data === "reload") location.reload(); };
 </script>
 </body>
 </html>`;
 }
+function maxStepOf(p) {
+  if (p.kind === "bullets") {
+    return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
+  }
+  return p.step;
+}
 function placedToHtml(p) {
   const inset = `left:${p.x * SCALE}px;top:${p.y * SCALE}px;width:${p.w * SCALE}px;height:${p.h * SCALE}px`;
   if (p.kind === "image") {
-    return `<img class="placed" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
+    return `<img class="placed" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
   }
   if (p.kind === "bullets") {
-    const lis = p.bullets.map((b) => `<li>${escapeText(b)}</li>`).join("");
-    return `<ul class="placed bullets" style="${inset}">${lis}</ul>`;
+    const lis = p.bullets.map((b) => `<li data-step="${b.step}">${escapeText(b.text)}</li>`).join("");
+    return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
   }
-  return `<div class="placed role-${p.role}" style="${inset}">${escapeText(p.text)}</div>`;
+  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}">${escapeText(p.text)}</div>`;
 }
 function escapeText(s) {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
@@ -2385,7 +2513,7 @@ function drawPlaced(slide, p) {
     return;
   }
   if (p.kind === "bullets") {
-    const items = p.bullets.map((b) => ({ text: b, options: { bullet: true } }));
+    const items = p.bullets.map((b) => ({ text: b.text, options: { bullet: true } }));
     slide.addText(items, {
       x: p.x,
       y: p.y,
@@ -2422,6 +2550,119 @@ function textStyle(role) {
   }
 }
 
+// src/render/image-pptx.ts
+import puppeteer from "puppeteer";
+import pptxgen2 from "pptxgenjs";
+
+// src/render/screenshot.ts
+var BASE_SCALE = 80;
+function maxStepOf2(placed) {
+  let m = 0;
+  for (const p of placed) {
+    m = Math.max(m, p.step);
+    if (p.kind === "bullets")
+      for (const b of p.bullets)
+        m = Math.max(m, b.step);
+  }
+  return m;
+}
+function renderSlideStill(placed, currentStep) {
+  const items = placed.filter((p) => p.step <= currentStep).map((p) => placedToHtml2(p, currentStep)).join(`
+`);
+  const w = Math.round(SLIDE_W * BASE_SCALE);
+  const h = Math.round(SLIDE_H * BASE_SCALE);
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: ${w}px; height: ${h}px; background: #fafafa; color: #111; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  .placed { position: absolute; display: flex; flex-direction: column; }
+  .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
+  .role-subtitle { font-size: 22px; color: #555; justify-content: center; }
+  .role-heading { font-size: 22px; font-weight: 600; justify-content: center; }
+  .role-text { font-size: 16px; }
+  .role-quote { font-size: 22px; font-style: italic; text-align: center; justify-content: center; }
+  .role-attribution { font-size: 14px; color: #666; text-align: center; justify-content: center; }
+  .bullets { font-size: 18px; padding-left: 1.2em; margin: 0; list-style: disc; }
+  .bullets li { margin: 0 0 6px 0; }
+  .bullets li.hidden { visibility: hidden; }
+  img.placed { object-fit: contain; }
+</style>
+</head>
+<body>
+${items}
+</body>
+</html>`;
+}
+function placedToHtml2(p, currentStep) {
+  const inset = `left:${p.x * BASE_SCALE}px;top:${p.y * BASE_SCALE}px;width:${p.w * BASE_SCALE}px;height:${p.h * BASE_SCALE}px`;
+  if (p.kind === "image") {
+    return `<img class="placed" src="${escapeAttr2(p.src)}" alt="${escapeAttr2(p.alt ?? "")}" style="${inset}">`;
+  }
+  if (p.kind === "bullets") {
+    const lis = p.bullets.map((b) => {
+      const cls = b.step > currentStep ? "hidden" : "";
+      return `<li class="${cls}">${escapeText2(b.text)}</li>`;
+    }).join("");
+    return `<ul class="placed bullets" style="${inset}">${lis}</ul>`;
+  }
+  return `<div class="placed role-${p.role}" style="${inset}">${escapeText2(p.text)}</div>`;
+}
+function escapeText2(s) {
+  return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
+}
+function escapeAttr2(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
+}
+
+// src/render/image-pptx.ts
+function expandFrames(placedDeck) {
+  const frames = [];
+  for (let i = 0;i < placedDeck.length; i++) {
+    const max = maxStepOf2(placedDeck[i]);
+    for (let step = 0;step <= max; step++) {
+      frames.push({ slideIndex: i, step });
+    }
+  }
+  return frames;
+}
+var PptxCtor2 = pptxgen2;
+async function renderImagePptx(slides, outPath, opts = {}) {
+  const widthPx = opts.widthPx ?? 1920;
+  const baseW = Math.round(SLIDE_W * BASE_SCALE);
+  const baseH = Math.round(SLIDE_H * BASE_SCALE);
+  const dsf = widthPx / baseW;
+  const placedDeck = layoutDeck(slides);
+  const browser = await puppeteer.launch({ headless: true });
+  let frameCount = 0;
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: baseW, height: baseH, deviceScaleFactor: dsf });
+    const pptx = new PptxCtor2;
+    pptx.layout = "LAYOUT_WIDE";
+    pptx.title = "slidekick deck";
+    const frames = expandFrames(placedDeck);
+    for (const { slideIndex, step } of frames) {
+      const placed = placedDeck[slideIndex];
+      const html = renderSlideStill(placed, step);
+      await page.setContent(html, { waitUntil: "load" });
+      const raw = await page.screenshot({ type: "png", omitBackground: false });
+      const dataUrl = `image/png;base64,${Buffer.from(raw).toString("base64")}`;
+      const slide = pptx.addSlide();
+      slide.background = { color: "FAFAFA" };
+      slide.addImage({ data: dataUrl, x: 0, y: 0, w: SLIDE_W, h: SLIDE_H });
+      frameCount++;
+      opts.onFrame?.(slideIndex, step, placedDeck.length);
+    }
+    await pptx.writeFile({ fileName: outPath });
+  } finally {
+    await browser.close();
+  }
+  return { slideCount: placedDeck.length, frameCount };
+}
+
 // src/commands/build.ts
 async function buildCommand(options) {
   const entry = resolve3(process.cwd(), options.entry);
@@ -2435,6 +2676,23 @@ async function buildCommand(options) {
   console.log(`loading ${entry}`);
   const slides = await loadDeck(entry);
   console.log(`rendering ${slides.length} slide${slides.length === 1 ? "" : "s"}`);
+  if (options.imageMode) {
+    const widthPx = options.imageWidth ? parseInt(options.imageWidth, 10) : 1920;
+    if (!Number.isFinite(widthPx) || widthPx < 320) {
+      console.error(`--image-width must be an integer >= 320`);
+      process.exit(1);
+    }
+    const stats = await renderImagePptx(slides, out, {
+      widthPx,
+      onFrame: (slideIndex, step, total) => {
+        process.stdout.write(`\r  frame: slide ${slideIndex + 1}/${total}, step ${step}   `);
+      }
+    });
+    process.stdout.write(`
+`);
+    console.log(`wrote ${out} (${stats.frameCount} frames from ${stats.slideCount} slides at ${widthPx}px)`);
+    return;
+  }
   await renderPptx(slides, out);
   console.log(`wrote ${out}`);
 }
@@ -2453,5 +2711,5 @@ program2.name("slidekick").description("Author slide decks as TSX with an AI sid
 program2.command("init").description("Scaffold a new slidekick deck project").argument("[dir]", "directory to create (defaults to current dir)").action(initCommand);
 program2.command("agent").description("Print agent-friendly instructions for authoring a deck").action(agentCommand);
 program2.command("dev").description("Start a live-preview server while editing slides").option("-p, --port <port>", "port to serve on", "5179").option("-e, --entry <entry>", "deck entry file", "deck.tsx").action(devCommand);
-program2.command("build").description("Render the deck to a .pptx file").option("-e, --entry <entry>", "deck entry file", "deck.tsx").option("-o, --out <out>", "output .pptx path", "out/deck.pptx").action(buildCommand);
+program2.command("build").description("Render the deck to a .pptx file").option("-e, --entry <entry>", "deck entry file", "deck.tsx").option("-o, --out <out>", "output .pptx path", "out/deck.pptx").option("--image-mode", "render each slide step as a full-bleed image (portable, uneditable)").option("--image-width <px>", "image width in pixels for --image-mode", "1920").action(buildCommand);
 program2.parseAsync(process.argv);
