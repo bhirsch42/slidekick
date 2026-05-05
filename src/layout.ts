@@ -1,4 +1,17 @@
-import type { BulletNode, ColumnNode, Deck, SlideChild, SlideNode } from "./types.js";
+import type {
+  Background,
+  BulletNode,
+  ColumnNode,
+  Deck,
+  ImageCrop,
+  ImageFit,
+  ParagraphAlign,
+  Run,
+  SlideAlign,
+  SlideChild,
+  SlideNode,
+  TextRole,
+} from "./types.js";
 
 export const SLIDE_W = 13.333;
 export const SLIDE_H = 7.5;
@@ -8,18 +21,57 @@ const GAP = 0.2;
 const TITLE_H = 1.0;
 const SUBTITLE_H = 0.7;
 const HEADING_H = 0.5;
+const TEXT_NAT_H = 0.6;
+const BULLET_NAT_H = 0.4;
+const IMAGE_NAT_H = 3.0;
 
-export type TextRole = "title" | "subtitle" | "heading" | "text" | "quote" | "attribution";
+export type { TextRole };
 
 export interface BulletItem {
-  text: string;
+  runs: Run[];
+  align?: ParagraphAlign;
   step: number;
 }
 
 export type Placed =
-  | { kind: "text"; role: TextRole; text: string; x: number; y: number; w: number; h: number; step: number }
-  | { kind: "bullets"; bullets: BulletItem[]; x: number; y: number; w: number; h: number; step: number }
-  | { kind: "image"; src: string; alt?: string; x: number; y: number; w: number; h: number; step: number };
+  | {
+      kind: "text";
+      role: TextRole;
+      runs: Run[];
+      align?: ParagraphAlign;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      step: number;
+    }
+  | {
+      kind: "bullets";
+      bullets: BulletItem[];
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      step: number;
+    }
+  | {
+      kind: "image";
+      src: string;
+      alt?: string;
+      fit: ImageFit;
+      crop?: ImageCrop;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      step: number;
+    };
+
+export interface SlideLayout {
+  background?: Background;
+  align?: SlideAlign;
+  placed: Placed[];
+}
 
 interface Box {
   x: number;
@@ -32,16 +84,23 @@ type StepFor = (i: number) => number;
 
 const constStep = (s: number): StepFor => () => s;
 
-export function layoutDeck(deck: Deck): Placed[][] {
+export function layoutDeck(deck: Deck): SlideLayout[] {
   return deck.map(layoutSlide);
 }
 
-function layoutSlide(slide: SlideNode): Placed[] {
+function layoutSlide(slide: SlideNode): SlideLayout {
   const out: Placed[] = [];
-  const area: Box = { x: PAD, y: PAD, w: SLIDE_W - 2 * PAD, h: SLIDE_H - 2 * PAD };
+  const hasChildren = slide.children.length > 0;
+  const padded = !slide.background || hasChildren;
+  const pad = padded ? PAD : 0;
+  const area: Box = { x: pad, y: pad, w: SLIDE_W - 2 * pad, h: SLIDE_H - 2 * pad };
   const slideStep = slide.step ?? 0;
-  layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
-  return out;
+  if (slide.align && hasChildren) {
+    layoutAligned(slide.children, area, out, slideStep, slide.align);
+  } else {
+    layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
+  }
+  return { background: slide.background, align: slide.align, placed: out };
 }
 
 function fixedHeight(child: SlideChild): number | null {
@@ -49,6 +108,24 @@ function fixedHeight(child: SlideChild): number | null {
   if (child.kind === "subtitle") return SUBTITLE_H;
   if (child.kind === "heading") return HEADING_H;
   return null;
+}
+
+function naturalHeight(child: SlideChild): number {
+  const fixed = fixedHeight(child);
+  if (fixed != null) return fixed;
+  switch (child.kind) {
+    case "text":
+      return TEXT_NAT_H;
+    case "bullets":
+      return Math.max(BULLET_NAT_H, child.children.length * BULLET_NAT_H);
+    case "image":
+      return IMAGE_NAT_H;
+    case "columns":
+    case "group":
+      return 1.0;
+    default:
+      return TEXT_NAT_H;
+  }
 }
 
 function layoutVertical(
@@ -74,6 +151,27 @@ function layoutVertical(
   }
 }
 
+function layoutAligned(
+  children: SlideChild[],
+  area: Box,
+  out: Placed[],
+  inheritedStep: number,
+  align: SlideAlign,
+): void {
+  const heights = children.map(naturalHeight);
+  const totalGaps = Math.max(0, children.length - 1) * GAP;
+  const total = heights.reduce((s, h) => s + h, 0) + totalGaps;
+  const slack = Math.max(0, area.h - total);
+  const offset = align === "center" ? slack / 2 : align === "end" ? slack : 0;
+  let y = area.y + offset;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]!;
+    const h = heights[i]!;
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out, inheritedStep, inheritedStep);
+    y += h + GAP;
+  }
+}
+
 function layoutChild(
   node: SlideChild,
   area: Box,
@@ -87,45 +185,35 @@ function layoutChild(
     case "subtitle":
     case "heading":
     case "text":
-      out.push({ kind: "text", role: node.kind, text: node.text, ...area, step });
+      out.push({
+        kind: "text",
+        role: node.kind,
+        runs: node.runs,
+        align: node.align,
+        ...area,
+        step,
+      });
       return;
     case "bullets": {
       const bullets: BulletItem[] = node.children.map((b: BulletNode) => ({
-        text: b.text,
+        runs: b.runs,
+        align: b.align,
         step: b.step ?? step,
       }));
       out.push({ kind: "bullets", bullets, ...area, step });
       return;
     }
     case "image":
-      out.push({ kind: "image", src: node.src, alt: node.alt, ...area, step });
-      return;
-    case "quote": {
-      const attrH = node.attribution ? 0.5 : 0;
       out.push({
-        kind: "text",
-        role: "quote",
-        text: node.text,
-        x: area.x,
-        y: area.y,
-        w: area.w,
-        h: area.h - attrH,
+        kind: "image",
+        src: node.src,
+        alt: node.alt,
+        fit: node.fit ?? "contain",
+        crop: node.crop,
+        ...area,
         step,
       });
-      if (node.attribution) {
-        out.push({
-          kind: "text",
-          role: "attribution",
-          text: `— ${node.attribution}`,
-          x: area.x,
-          y: area.y + area.h - attrH,
-          w: area.w,
-          h: attrH,
-          step,
-        });
-      }
       return;
-    }
     case "columns": {
       const cols = node.children;
       if (cols.length === 0) return;

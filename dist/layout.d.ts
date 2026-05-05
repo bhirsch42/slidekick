@@ -1,15 +1,17 @@
-import type { Deck } from "./types.js";
+import type { Background, Deck, ImageCrop, ImageFit, ParagraphAlign, Run, SlideAlign, TextRole } from "./types.js";
 export declare const SLIDE_W = 13.333;
 export declare const SLIDE_H = 7.5;
-export type TextRole = "title" | "subtitle" | "heading" | "text" | "quote" | "attribution";
+export type { TextRole };
 export interface BulletItem {
-    text: string;
+    runs: Run[];
+    align?: ParagraphAlign;
     step: number;
 }
 export type Placed = {
     kind: "text";
     role: TextRole;
-    text: string;
+    runs: Run[];
+    align?: ParagraphAlign;
     x: number;
     y: number;
     w: number;
@@ -27,10 +29,17 @@ export type Placed = {
     kind: "image";
     src: string;
     alt?: string;
+    fit: ImageFit;
+    crop?: ImageCrop;
     x: number;
     y: number;
     w: number;
     h: number;
     step: number;
 };
-export declare function layoutDeck(deck: Deck): Placed[][];
+export interface SlideLayout {
+    background?: Background;
+    align?: SlideAlign;
+    placed: Placed[];
+}
+export declare function layoutDeck(deck: Deck): SlideLayout[];

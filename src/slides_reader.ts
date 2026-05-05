@@ -1,34 +1,95 @@
 import type { slides_v1 } from "googleapis";
 import type {
+  Background,
   BulletNode,
-  Deck,
+  BulletsNode,
+  DeckModule,
+  HeadingNode,
   ImageNode,
+  Run,
+  RunStyle,
   SlideChild,
   SlideNode,
-  TextNode,
-  TitleNode,
   SubtitleNode,
-  HeadingNode,
-  BulletsNode,
-  QuoteNode,
+  TextNode,
+  Theme,
+  TitleNode,
 } from "./types.js";
 
 type Page = slides_v1.Schema$Page;
 type PageElement = slides_v1.Schema$PageElement;
+type RgbColor = slides_v1.Schema$RgbColor;
 
-export function presentationToDeck(p: slides_v1.Schema$Presentation): Deck {
+export function presentationToDeck(p: slides_v1.Schema$Presentation): DeckModule {
   const slides = p.slides ?? [];
-  return slides.map(slideToNode);
+  const pageW = p.pageSize?.width?.magnitude ?? 0;
+  const pageH = p.pageSize?.height?.magnitude ?? 0;
+
+  const theme = inferTheme(p);
+
+  const slideNodes = slides.map((s) => slideToNode(s, pageW, pageH, theme));
+  const result: DeckModule = { slides: slideNodes };
+  if (Object.keys(theme).length > 0) result.theme = theme;
+  return result;
 }
 
-function slideToNode(slide: Page): SlideNode {
+function slideToNode(slide: Page, pageW: number, pageH: number, theme: Theme): SlideNode {
   const elements = (slide.pageElements ?? []).slice().sort((a, b) => yOf(a) - yOf(b));
-  const children: SlideChild[] = [];
+
+  let background: Background | undefined;
+  const contentEls: PageElement[] = [];
+
   for (const el of elements) {
+    if (isFullPageImage(el, pageW, pageH)) {
+      const url = el.image?.sourceUrl ?? el.image?.contentUrl;
+      if (url && background === undefined) {
+        background = { image: url };
+        continue;
+      }
+    }
+    contentEls.push(el);
+  }
+
+  const bgFill = slide.pageProperties?.pageBackgroundFill;
+  if (background === undefined && bgFill) {
+    const rgb = bgFill.solidFill?.color?.rgbColor;
+    if (rgb) {
+      const hex = rgbToHex(rgb);
+      if (hex && hex !== theme.background) background = hex;
+    } else if (bgFill.stretchedPictureFill?.contentUrl) {
+      background = { image: bgFill.stretchedPictureFill.contentUrl };
+    }
+  }
+
+  const children: SlideChild[] = [];
+  for (const el of contentEls) {
     const child = elementToChild(el);
     if (child) children.push(child);
   }
-  return { kind: "slide", children };
+
+  const node: SlideNode = { kind: "slide", children };
+  if (background !== undefined) node.background = background;
+  return node;
+}
+
+function isFullPageImage(el: PageElement, pageW: number, pageH: number): boolean {
+  if (!el.image) return false;
+  if (pageW <= 0 || pageH <= 0) return false;
+  const w = el.size?.width?.magnitude;
+  const h = el.size?.height?.magnitude;
+  const sx = el.transform?.scaleX ?? 1;
+  const sy = el.transform?.scaleY ?? 1;
+  const tx = el.transform?.translateX ?? 0;
+  const ty = el.transform?.translateY ?? 0;
+  if (!w || !h) return false;
+  const rw = w * sx;
+  const rh = h * sy;
+  const tol = 0.02;
+  if (Math.abs(tx) > pageW * tol) return false;
+  if (Math.abs(ty) > pageH * tol) return false;
+  if (Math.abs(rw - pageW) > pageW * tol) return false;
+  if (Math.abs(rh - pageH) > pageH * tol) return false;
+  return true;
 }
 
 function yOf(el: PageElement): number {
@@ -50,123 +111,285 @@ function elementToChild(el: PageElement): SlideChild | null {
 
   const allBullets = paragraphs.every((p) => p.bullet);
   if (allBullets && paragraphs.length > 0) {
-    const bullets: BulletNode[] = paragraphs.map((p) => ({ kind: "bullet", text: p.text }));
+    const bullets: BulletNode[] = paragraphs.map((p) => ({
+      kind: "bullet",
+      runs: collapseRuns(p.runs, p.dominant),
+    }));
     const node: BulletsNode = { kind: "bullets", children: bullets };
     return node;
   }
 
-  const text = paragraphs.map((p) => p.text).join("\n");
+  const allRuns: Run[] = [];
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i]!;
+    allRuns.push(...p.runs);
+    if (i < paragraphs.length - 1) allRuns.push({ text: "\n" });
+  }
+  const dominant = paragraphs[0]!.dominant;
+  const runs = collapseRuns(allRuns, dominant);
+  const text = runs.map((r) => r.text).join("");
   if (!text.trim()) return null;
-  const style = paragraphs[0]!.style;
 
-  const role = classifyText(style);
+  const role = classifyText(dominant);
   switch (role) {
     case "title":
-      return { kind: "title", text } as TitleNode;
+      return { kind: "title", runs } as TitleNode;
     case "subtitle":
-      return { kind: "subtitle", text } as SubtitleNode;
+      return { kind: "subtitle", runs } as SubtitleNode;
     case "heading":
-      return { kind: "heading", text } as HeadingNode;
-    case "quote":
-      return { kind: "quote", text } as QuoteNode;
+      return { kind: "heading", runs } as HeadingNode;
     default:
-      return { kind: "text", text } as TextNode;
+      return { kind: "text", runs } as TextNode;
   }
 }
 
-interface Paragraph {
-  text: string;
-  bullet: boolean;
-  style: { fontSize?: number; bold?: boolean; italic?: boolean };
+interface RawStyle {
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontFamily?: string;
+  color?: string;
 }
 
-function parseParagraphs(text: slides_v1.Schema$TextContent): Paragraph[] {
+interface RawParagraph {
+  bullet: boolean;
+  runs: Run[];
+  dominant: RawStyle;
+}
+
+function parseParagraphs(text: slides_v1.Schema$TextContent): RawParagraph[] {
   const elements = text.textElements ?? [];
-  const paragraphs: Paragraph[] = [];
-  let current: Paragraph = { text: "", bullet: false, style: {} };
+  const paragraphs: RawParagraph[] = [];
+  let currentRuns: Run[] = [];
+  let currentBullet = false;
+  let dominant: RawStyle = {};
+
+  function flush(): void {
+    if (currentRuns.length === 0) return;
+    paragraphs.push({ bullet: currentBullet, runs: currentRuns, dominant });
+    currentRuns = [];
+    dominant = {};
+  }
 
   for (const e of elements) {
     if (e.paragraphMarker) {
-      current.bullet = !!e.paragraphMarker.bullet;
+      flush();
+      currentBullet = !!e.paragraphMarker.bullet;
     } else if (e.textRun) {
       const content = e.textRun.content ?? "";
-      const style = e.textRun.style;
-      if (style && Object.keys(current.style).length === 0) {
-        if (style.fontSize?.magnitude) current.style.fontSize = style.fontSize.magnitude;
-        if (style.bold) current.style.bold = true;
-        if (style.italic) current.style.italic = true;
-      }
+      const raw = textRunStyle(e.textRun.style ?? {});
+      if (Object.keys(dominant).length === 0) dominant = raw;
       const lines = content.split("\n");
       lines.forEach((line, i) => {
-        current.text += line;
+        if (line.length > 0) {
+          currentRuns.push(toRun(line, raw));
+        }
         if (i < lines.length - 1) {
-          paragraphs.push(current);
-          current = { text: "", bullet: current.bullet, style: {} };
+          flush();
+          currentBullet = currentBullet;
         }
       });
     }
   }
-  if (current.text.length > 0) paragraphs.push(current);
-  return paragraphs.filter((p) => p.text.length > 0);
+  flush();
+  return paragraphs.filter((p) => p.runs.some((r) => r.text.length > 0));
 }
 
-function classifyText(style: { fontSize?: number; bold?: boolean; italic?: boolean }): string {
+function textRunStyle(style: slides_v1.Schema$TextStyle): RawStyle {
+  const out: RawStyle = {};
+  if (style.fontSize?.magnitude) out.fontSize = style.fontSize.magnitude;
+  if (style.bold) out.bold = true;
+  if (style.italic) out.italic = true;
+  if (style.fontFamily) out.fontFamily = style.fontFamily;
+  const rgb = style.foregroundColor?.opaqueColor?.rgbColor;
+  if (rgb) {
+    const hex = rgbToHex(rgb);
+    if (hex) out.color = hex;
+  }
+  return out;
+}
+
+function toRun(text: string, raw: RawStyle): Run {
+  const style: RunStyle = {};
+  if (raw.fontSize !== undefined) style.size = raw.fontSize;
+  if (raw.bold) style.weight = 700;
+  if (raw.italic) style.italic = true;
+  if (raw.fontFamily) style.font = raw.fontFamily;
+  if (raw.color) style.color = raw.color;
+  if (Object.keys(style).length === 0) return { text };
+  return { text, style };
+}
+
+function collapseRuns(runs: Run[], dominant: RawStyle): Run[] {
+  const out: Run[] = [];
+  for (const r of runs) {
+    const filtered = filterToOverrides(r.style, dominant);
+    const stripped: Run = filtered ? { text: r.text, style: filtered } : { text: r.text };
+    const last = out[out.length - 1];
+    if (last && sameStyle(last.style, stripped.style)) {
+      last.text += stripped.text;
+    } else {
+      out.push(stripped);
+    }
+  }
+  return out;
+}
+
+function filterToOverrides(style: RunStyle | undefined, dominant: RawStyle): RunStyle | undefined {
+  if (!style) return undefined;
+  const out: RunStyle = {};
+  if (style.size !== undefined && style.size !== dominant.fontSize) out.size = style.size;
+  if (style.weight !== undefined && (style.weight === 700) !== !!dominant.bold) out.weight = style.weight;
+  if (style.italic !== undefined && !!style.italic !== !!dominant.italic) out.italic = style.italic;
+  if (style.font !== undefined && style.font !== dominant.fontFamily) out.font = style.font;
+  if (style.color !== undefined && style.color !== dominant.color) out.color = style.color;
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+function sameStyle(a: RunStyle | undefined, b: RunStyle | undefined): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return (
+    a.size === b.size &&
+    a.weight === b.weight &&
+    a.italic === b.italic &&
+    a.font === b.font &&
+    a.color === b.color
+  );
+}
+
+function classifyText(style: RawStyle): string {
   const size = style.fontSize ?? 14;
-  if (style.italic && size >= 18) return "quote";
   if (style.bold && size >= 30) return "title";
   if (style.bold) return "heading";
   if (size >= 20) return "subtitle";
   return "text";
 }
 
-export function deckToTsx(deck: Deck): string {
+function rgbToHex(rgb: RgbColor): string | null {
+  const r = Math.round((rgb.red ?? 0) * 255);
+  const g = Math.round((rgb.green ?? 0) * 255);
+  const b = Math.round((rgb.blue ?? 0) * 255);
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+function inferTheme(p: slides_v1.Schema$Presentation): Theme {
+  const theme: Theme = {};
+
+  const masterBg = (p.masters ?? [])
+    .map((m) => m.pageProperties?.pageBackgroundFill?.solidFill?.color?.rgbColor)
+    .find((c) => c !== undefined);
+  if (masterBg) {
+    const hex = rgbToHex(masterBg);
+    if (hex) theme.background = hex;
+  }
+
+  const colors: string[] = [];
+  const fonts: string[] = [];
+  for (const slide of p.slides ?? []) {
+    for (const el of slide.pageElements ?? []) {
+      const els = el.shape?.text?.textElements ?? [];
+      for (const e of els) {
+        const s = e.textRun?.style;
+        if (!s) continue;
+        const rgb = s.foregroundColor?.opaqueColor?.rgbColor;
+        if (rgb) {
+          const hex = rgbToHex(rgb);
+          if (hex) colors.push(hex);
+        }
+        if (s.fontFamily) fonts.push(s.fontFamily);
+      }
+    }
+  }
+
+  const modeColor = mode(colors);
+  if (modeColor) theme.text = modeColor;
+  const modeFont = mode(fonts);
+  if (modeFont) theme.fonts = { body: modeFont };
+
+  return theme;
+}
+
+function mode<T>(arr: T[]): T | undefined {
+  if (arr.length === 0) return undefined;
+  const counts = new Map<T, number>();
+  for (const v of arr) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best: T | undefined;
+  let bestCount = 0;
+  for (const [v, c] of counts) {
+    if (c > bestCount) {
+      best = v;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+export function deckToTsx(deck: DeckModule): string {
   const used = new Set<string>(["Slide"]);
-  const slidesSrc = deck.map((s) => renderSlide(s, used)).join(",\n    ");
+  const slidesSrc = deck.slides.map((s) => renderSlide(s, used)).join(",\n    ");
+  const themeSrc = deck.theme && Object.keys(deck.theme).length > 0
+    ? `const theme = ${stringifyTheme(deck.theme)};\n\n`
+    : "";
+  const returnExpr = deck.theme && Object.keys(deck.theme).length > 0
+    ? `{ theme, slides: [\n    ${slidesSrc},\n  ] }`
+    : `[\n    ${slidesSrc},\n  ]`;
   const imports = Array.from(used).sort().join(", ");
   return `import { ${imports} } from "slidekick";
 
 export default function deck() {
-  return [
-    ${slidesSrc},
-  ];
+  ${themeSrc.trim()}${themeSrc ? "\n\n  " : ""}return ${returnExpr};
 }
 `;
 }
 
+function stringifyTheme(theme: Theme): string {
+  return JSON.stringify(theme, null, 2).replace(/\n/g, "\n  ");
+}
+
 function renderSlide(slide: SlideNode, used: Set<string>): string {
+  const props: string[] = [];
+  if (slide.background !== undefined) {
+    if (typeof slide.background === "string") {
+      props.push(` background=${JSON.stringify(slide.background)}`);
+    } else {
+      props.push(` background={{ image: ${JSON.stringify(slide.background.image)} }}`);
+    }
+  }
+  if (slide.align) props.push(` align=${JSON.stringify(slide.align)}`);
+  const open = `<Slide${props.join("")}>`;
+  if (slide.children.length === 0) {
+    return `<Slide${props.join("")} />`;
+  }
   const body = slide.children.map((c) => renderChild(c, used, "      ")).join("\n");
-  return `<Slide>\n${body}\n    </Slide>`;
+  return `${open}\n${body}\n    </Slide>`;
 }
 
 function renderChild(node: SlideChild, used: Set<string>, indent: string): string {
   switch (node.kind) {
     case "title":
       used.add("Title");
-      return `${indent}<Title>${escapeJsxText(node.text)}</Title>`;
+      return `${indent}<Title>${renderRuns(node.runs, used)}</Title>`;
     case "subtitle":
       used.add("Subtitle");
-      return `${indent}<Subtitle>${escapeJsxText(node.text)}</Subtitle>`;
+      return `${indent}<Subtitle>${renderRuns(node.runs, used)}</Subtitle>`;
     case "heading":
       used.add("Heading");
-      return `${indent}<Heading>${escapeJsxText(node.text)}</Heading>`;
+      return `${indent}<Heading>${renderRuns(node.runs, used)}</Heading>`;
     case "text":
       used.add("Text");
-      return `${indent}<Text>${escapeJsxText(node.text)}</Text>`;
-    case "quote": {
-      used.add("Quote");
-      const attr = node.attribution ? ` attribution=${JSON.stringify(node.attribution)}` : "";
-      return `${indent}<Quote${attr}>${escapeJsxText(node.text)}</Quote>`;
-    }
+      return `${indent}<Text>${renderRuns(node.runs, used)}</Text>`;
     case "image": {
       used.add("Image");
       const alt = node.alt ? ` alt=${JSON.stringify(node.alt)}` : "";
-      return `${indent}<Image src=${JSON.stringify(node.src)}${alt} />`;
+      const fit = node.fit && node.fit !== "contain" ? ` fit=${JSON.stringify(node.fit)}` : "";
+      return `${indent}<Image src=${JSON.stringify(node.src)}${alt}${fit} />`;
     }
     case "bullets": {
       used.add("Bullets");
       used.add("Bullet");
       const items = node.children
-        .map((b) => `${indent}  <Bullet>${escapeJsxText(b.text)}</Bullet>`)
+        .map((b) => `${indent}  <Bullet>${renderRuns(b.runs, used)}</Bullet>`)
         .join("\n");
       return `${indent}<Bullets>\n${items}\n${indent}</Bullets>`;
     }
@@ -188,6 +411,29 @@ function renderChild(node: SlideChild, used: Set<string>, indent: string): strin
       return `${indent}<Group>\n${inner}\n${indent}</Group>`;
     }
   }
+}
+
+function renderRuns(runs: Run[], used: Set<string>): string {
+  return runs
+    .map((r) => {
+      const text = escapeJsxText(r.text);
+      if (!r.style) return text;
+      used.add("Span");
+      const attrs: string[] = [];
+      if (r.style.size !== undefined) {
+        attrs.push(
+          typeof r.style.size === "number"
+            ? `size={${r.style.size}}`
+            : `size=${JSON.stringify(r.style.size)}`,
+        );
+      }
+      if (r.style.weight !== undefined) attrs.push(`weight={${r.style.weight}}`);
+      if (r.style.italic) attrs.push(`italic`);
+      if (r.style.font) attrs.push(`font=${JSON.stringify(r.style.font)}`);
+      if (r.style.color) attrs.push(`color=${JSON.stringify(r.style.color)}`);
+      return `<Span ${attrs.join(" ")}>${text}</Span>`;
+    })
+    .join("");
 }
 
 function escapeJsxText(s: string): string {

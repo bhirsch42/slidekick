@@ -89,30 +89,35 @@ describe.skipIf(!RUN_LIVE)("live round-trip against Google Slides", () => {
     const { slides } = await getClients();
     const got = await slides.presentations.get({ presentationId });
     const pulled = presentationToDeck(got.data);
-    expect(pulled).toHaveLength(deck.length);
+    expect(pulled.slides).toHaveLength(deck.length);
   });
 
   test("pulled slide 0 has a Title and a Subtitle", async () => {
     const { slides } = await getClients();
     const got = await slides.presentations.get({ presentationId });
     const pulled = presentationToDeck(got.data);
-    const kinds = pulled[0]!.children.map((c) => c.kind);
+    const kinds = pulled.slides[0]!.children.map((c) => c.kind);
     expect(kinds).toContain("title");
     expect(kinds).toContain("subtitle");
 
-    const titleNode = pulled[0]!.children.find((c) => c.kind === "title");
-    expect(titleNode && "text" in titleNode ? titleNode.text : "").toBe("Round-trip test");
+    const titleNode = pulled.slides[0]!.children.find((c) => c.kind === "title");
+    const text = titleNode && "runs" in titleNode
+      ? titleNode.runs.map((r) => r.text).join("")
+      : "";
+    expect(text).toBe("Round-trip test");
   });
 
   test("pulled slide 1 has a Bullets node with 3 bullets", async () => {
     const { slides } = await getClients();
     const got = await slides.presentations.get({ presentationId });
     const pulled = presentationToDeck(got.data);
-    const bulletsNode = pulled[1]!.children.find((c) => c.kind === "bullets");
+    const bulletsNode = pulled.slides[1]!.children.find((c) => c.kind === "bullets");
     expect(bulletsNode).toBeTruthy();
     if (bulletsNode && bulletsNode.kind === "bullets") {
       expect(bulletsNode.children).toHaveLength(3);
-      expect(bulletsNode.children.map((b) => b.text)).toEqual([
+      expect(
+        bulletsNode.children.map((b) => b.runs.map((r) => r.text).join("")),
+      ).toEqual([
         "Catch API drift early",
         "Verify reader/writer symmetry",
         "Real round-trip, not a mock",

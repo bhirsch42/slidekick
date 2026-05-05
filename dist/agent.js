@@ -43,7 +43,6 @@ Content:
 - <Bullet>         one bullet point.
 - <Text>           a paragraph or short prose.
 - <Image src>      an image. src must be a public HTTPS URL.
-- <Quote attribution?>  a pull quote, optionally attributed.
 - <Group>          layout-transparent container that auto-numbers
                    reveal steps for its direct children (preview only).
 

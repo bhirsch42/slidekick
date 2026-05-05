@@ -1,2 +1,2 @@
-import type { Deck } from "./types.js";
-export declare function renderHtml(deck: Deck): string;
+import type { DeckInput } from "./types.js";
+export declare function renderHtml(input: DeckInput): string;

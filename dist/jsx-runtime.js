@@ -3,7 +3,9 @@ export function jsx(type, props, _key) {
 }
 export const jsxs = jsx;
 export const jsxDEV = jsx;
-export function Fragment(_props) {
-    throw new Error("Fragments (<>...</>) are not supported in slidekick. Use <Group> instead.");
+export function Fragment(props) {
+    if (props.children == null)
+        return [];
+    return props.children;
 }
 //# sourceMappingURL=jsx-runtime.js.map

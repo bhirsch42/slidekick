@@ -14,18 +14,23 @@ describe("layout", () => {
         ],
       }),
     ];
-    const placed = layoutDeck(deck);
-    expect(placed).toHaveLength(1);
-    const items = placed[0]!;
+    const slides = layoutDeck(deck);
+    expect(slides).toHaveLength(1);
+    const items = slides[0]!.placed;
     expect(items).toHaveLength(2);
 
     const [titleP, bulletsP] = items;
     expect(titleP!.kind).toBe("text");
-    if (titleP!.kind === "text") expect(titleP!.text).toBe("Hello");
+    if (titleP!.kind === "text") {
+      expect(titleP!.runs.map((r) => r.text).join("")).toBe("Hello");
+    }
 
     expect(bulletsP!.kind).toBe("bullets");
     if (bulletsP!.kind === "bullets") {
-      expect(bulletsP!.bullets.map((b) => b.text)).toEqual(["one", "two"]);
+      expect(bulletsP!.bullets.map((b) => b.runs.map((r) => r.text).join(""))).toEqual([
+        "one",
+        "two",
+      ]);
     }
 
     for (const p of items) {
@@ -42,8 +47,14 @@ describe("layout", () => {
         children: [Title({ children: "T" }), Subtitle({ children: "S" })],
       }),
     ];
-    const [titleP, subP] = layoutDeck(deck)[0]!;
+    const [titleP, subP] = layoutDeck(deck)[0]!.placed;
     expect(titleP!.h).toBeCloseTo(1.0);
     expect(subP!.h).toBeCloseTo(0.7);
+  });
+
+  test("background carries through to slide layout", () => {
+    const deck = [Slide({ background: "#111", children: [Title({ children: "x" })] })];
+    const sl = layoutDeck(deck)[0]!;
+    expect(sl.background).toBe("#111");
   });
 });

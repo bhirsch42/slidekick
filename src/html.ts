@@ -1,14 +1,57 @@
-import { layoutDeck, type Placed, SLIDE_H, SLIDE_W } from "./layout.js";
-import type { Deck } from "./types.js";
+import { layoutDeck, type Placed, SLIDE_H, SLIDE_W, type SlideLayout } from "./layout.js";
+import type {
+  Background,
+  Color,
+  DeckInput,
+  Run,
+  RunStyle,
+  SizeToken,
+  Theme,
+  TextRole,
+} from "./types.js";
 
 const SCALE = 80;
 
-export function renderHtml(deck: Deck): string {
-  const slidesHtml = layoutDeck(deck)
-    .map((placed, i) => {
-      const items = placed.map(placedToHtml).join("\n");
-      const maxStep = placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
-      return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}">${items}<div class="step-badge"></div></section>`;
+interface RoleStyle {
+  fontSize: number;
+  bold?: boolean;
+  italic?: boolean;
+}
+
+const ROLE_STYLES: Record<TextRole, RoleStyle> = {
+  title: { fontSize: 36, bold: true },
+  subtitle: { fontSize: 22 },
+  heading: { fontSize: 22, bold: true },
+  text: { fontSize: 16 },
+  bullet: { fontSize: 18 },
+};
+
+const TEXT_ALIGN: Record<string, string> = {
+  start: "left",
+  center: "center",
+  end: "right",
+};
+
+const SIZE_TOKENS: Record<SizeToken, number> = { sm: 0.85, md: 1.0, lg: 1.25 };
+
+function normalize(input: DeckInput): { theme: Theme; slides: SlideLayout[] } {
+  if (Array.isArray(input)) return { theme: {}, slides: layoutDeck(input) };
+  return { theme: input.theme ?? {}, slides: layoutDeck(input.slides) };
+}
+
+export function renderHtml(input: DeckInput): string {
+  const { theme, slides } = normalize(input);
+  const slidesHtml = slides
+    .map((slideLayout, i) => {
+      const items = slideLayout.placed.map((p) => placedToHtml(p, theme)).join("\n");
+      const maxStep = slideLayout.placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
+      const bg = slideLayout.background ?? theme.background;
+      const bgStyle = bgToCss(bg);
+      const themeText = theme.text ? `color:${escapeAttr(theme.text)};` : "";
+      const themeFont = theme.fonts?.body
+        ? `font-family:${escapeAttr(theme.fonts.body)};`
+        : "";
+      return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${items}<div class="step-badge"></div></section>`;
     })
     .join("\n");
 
@@ -31,18 +74,21 @@ export function renderHtml(deck: Deck): string {
     overflow: hidden;
     outline: 2px solid transparent;
     transition: outline-color 0.15s;
+    background-size: cover;
+    background-position: center;
   }
   .slide.focused { outline-color: #4a9eff; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
-  .role-subtitle { font-size: 22px; color: #555; justify-content: center; }
+  .role-subtitle { font-size: 22px; justify-content: center; }
   .role-heading { font-size: 22px; font-weight: 600; justify-content: center; }
   .role-text { font-size: 16px; }
-  .role-quote { font-size: 22px; font-style: italic; text-align: center; justify-content: center; }
-  .role-attribution { font-size: 14px; color: #666; text-align: center; justify-content: center; }
+  .role-bullet { font-size: 18px; }
   .bullets { font-size: 18px; padding-left: 1.2em; margin: 0; list-style: disc; }
   .bullets li { margin: 0 0 6px 0; }
   img.placed { object-fit: contain; }
+  img.fit-cover { object-fit: cover; }
+  img.fit-fill { object-fit: fill; }
   .stepped-hidden { visibility: hidden; }
   .step-badge {
     position: absolute; right: 8px; bottom: 8px;
@@ -116,6 +162,12 @@ ${slidesHtml}
 </html>`;
 }
 
+function bgToCss(bg: Background | undefined): string {
+  if (bg === undefined) return "";
+  if (typeof bg === "string") return `background-color:${escapeAttr(bg)};`;
+  return `background-image:url(${JSON.stringify(bg.image)});`;
+}
+
 function maxStepOf(p: Placed): number {
   if (p.kind === "bullets") {
     return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
@@ -123,18 +175,56 @@ function maxStepOf(p: Placed): number {
   return p.step;
 }
 
-function placedToHtml(p: Placed): string {
+function placedToHtml(p: Placed, theme: Theme): string {
   const inset = `left:${p.x * SCALE}px;top:${p.y * SCALE}px;width:${p.w * SCALE}px;height:${p.h * SCALE}px`;
   if (p.kind === "image") {
-    return `<img class="placed" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
+    const fitClass =
+      p.fit === "cover" ? " fit-cover" : p.fit === "fill" ? " fit-fill" : "";
+    return `<img class="placed${fitClass}" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
   }
   if (p.kind === "bullets") {
     const lis = p.bullets
-      .map((b) => `<li data-step="${b.step}">${escapeText(b.text)}</li>`)
+      .map((b) => {
+        const a = b.align && TEXT_ALIGN[b.align] ? `text-align:${TEXT_ALIGN[b.align]};` : "";
+        return `<li data-step="${b.step}" style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
+      })
       .join("");
     return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
   }
-  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}">${escapeText(p.text)}</div>`;
+  const ta = p.align && TEXT_ALIGN[p.align] ? `text-align:${TEXT_ALIGN[p.align]};` : "";
+  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
+}
+
+function runsToHtml(runs: Run[], role: TextRole, theme: Theme): string {
+  return runs
+    .map((r) => {
+      const text = escapeText(r.text).replace(/\n/g, "<br/>");
+      const css = runStyleCss(r.style, role, theme);
+      if (!css) return text;
+      return `<span style="${css}">${text}</span>`;
+    })
+    .join("");
+}
+
+function runStyleCss(style: RunStyle | undefined, role: TextRole, theme: Theme): string {
+  if (!style) return "";
+  const parts: string[] = [];
+  const base = ROLE_STYLES[role].fontSize;
+  let size: number | undefined;
+  if (style.size !== undefined) {
+    size = typeof style.size === "number" ? style.size : base * SIZE_TOKENS[style.size];
+  }
+  if (style.cite) {
+    size = (size ?? base) * 0.75;
+  }
+  if (size !== undefined) parts.push(`font-size:${size}px`);
+  if (style.weight !== undefined) parts.push(`font-weight:${style.weight}`);
+  if (style.italic) parts.push(`font-style:italic`);
+  if (style.font) parts.push(`font-family:${style.font}`);
+  let color: Color | undefined = style.color;
+  if (style.cite && !color && theme.accent) color = theme.accent;
+  if (color) parts.push(`color:${color}`);
+  return parts.join(";");
 }
 
 function escapeText(s: string): string {

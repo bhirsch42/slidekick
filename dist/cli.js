@@ -1939,7 +1939,6 @@ Content:
 - <Bullet>         one bullet point.
 - <Text>           a paragraph or short prose.
 - <Image src>      an image. src must be a public HTTPS URL.
-- <Quote attribution?>  a pull quote, optionally attributed.
 - <Group>          layout-transparent container that auto-numbers
                    reveal steps for its direct children (preview only).
 
@@ -2068,16 +2067,26 @@ var GAP = 0.2;
 var TITLE_H = 1;
 var SUBTITLE_H = 0.7;
 var HEADING_H = 0.5;
+var TEXT_NAT_H = 0.6;
+var BULLET_NAT_H = 0.4;
+var IMAGE_NAT_H = 3;
 var constStep = (s) => () => s;
 function layoutDeck(deck) {
   return deck.map(layoutSlide);
 }
 function layoutSlide(slide) {
   const out = [];
-  const area = { x: PAD, y: PAD, w: SLIDE_W - 2 * PAD, h: SLIDE_H - 2 * PAD };
+  const hasChildren = slide.children.length > 0;
+  const padded = !slide.background || hasChildren;
+  const pad = padded ? PAD : 0;
+  const area = { x: pad, y: pad, w: SLIDE_W - 2 * pad, h: SLIDE_H - 2 * pad };
   const slideStep = slide.step ?? 0;
-  layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
-  return out;
+  if (slide.align && hasChildren) {
+    layoutAligned(slide.children, area, out, slideStep, slide.align);
+  } else {
+    layoutVertical(slide.children, area, out, constStep(slideStep), slideStep);
+  }
+  return { background: slide.background, align: slide.align, placed: out };
 }
 function fixedHeight(child) {
   if (child.kind === "title")
@@ -2087,6 +2096,24 @@ function fixedHeight(child) {
   if (child.kind === "heading")
     return HEADING_H;
   return null;
+}
+function naturalHeight(child) {
+  const fixed = fixedHeight(child);
+  if (fixed != null)
+    return fixed;
+  switch (child.kind) {
+    case "text":
+      return TEXT_NAT_H;
+    case "bullets":
+      return Math.max(BULLET_NAT_H, child.children.length * BULLET_NAT_H);
+    case "image":
+      return IMAGE_NAT_H;
+    case "columns":
+    case "group":
+      return 1;
+    default:
+      return TEXT_NAT_H;
+  }
 }
 function layoutVertical(children, area, out, stepFor, inheritedStep) {
   if (children.length === 0)
@@ -2104,6 +2131,20 @@ function layoutVertical(children, area, out, stepFor, inheritedStep) {
     y += h + GAP;
   }
 }
+function layoutAligned(children, area, out, inheritedStep, align) {
+  const heights = children.map(naturalHeight);
+  const totalGaps = Math.max(0, children.length - 1) * GAP;
+  const total = heights.reduce((s, h) => s + h, 0) + totalGaps;
+  const slack = Math.max(0, area.h - total);
+  const offset = align === "center" ? slack / 2 : align === "end" ? slack : 0;
+  let y = area.y + offset;
+  for (let i = 0;i < children.length; i++) {
+    const child = children[i];
+    const h = heights[i];
+    layoutChild(child, { x: area.x, y, w: area.w, h }, out, inheritedStep, inheritedStep);
+    y += h + GAP;
+  }
+}
 function layoutChild(node, area, out, stepHint, inheritedStep) {
   const step = node.step ?? stepHint;
   switch (node.kind) {
@@ -2111,45 +2152,35 @@ function layoutChild(node, area, out, stepHint, inheritedStep) {
     case "subtitle":
     case "heading":
     case "text":
-      out.push({ kind: "text", role: node.kind, text: node.text, ...area, step });
+      out.push({
+        kind: "text",
+        role: node.kind,
+        runs: node.runs,
+        align: node.align,
+        ...area,
+        step
+      });
       return;
     case "bullets": {
       const bullets = node.children.map((b) => ({
-        text: b.text,
+        runs: b.runs,
+        align: b.align,
         step: b.step ?? step
       }));
       out.push({ kind: "bullets", bullets, ...area, step });
       return;
     }
     case "image":
-      out.push({ kind: "image", src: node.src, alt: node.alt, ...area, step });
-      return;
-    case "quote": {
-      const attrH = node.attribution ? 0.5 : 0;
       out.push({
-        kind: "text",
-        role: "quote",
-        text: node.text,
-        x: area.x,
-        y: area.y,
-        w: area.w,
-        h: area.h - attrH,
+        kind: "image",
+        src: node.src,
+        alt: node.alt,
+        fit: node.fit ?? "contain",
+        crop: node.crop,
+        ...area,
         step
       });
-      if (node.attribution) {
-        out.push({
-          kind: "text",
-          role: "attribution",
-          text: `\u2014 ${node.attribution}`,
-          x: area.x,
-          y: area.y + area.h - attrH,
-          w: area.w,
-          h: attrH,
-          step
-        });
-      }
       return;
-    }
     case "columns": {
       const cols = node.children;
       if (cols.length === 0)
@@ -2178,12 +2209,35 @@ function layoutChild(node, area, out, stepHint, inheritedStep) {
 
 // src/html.ts
 var SCALE = 80;
-function renderHtml(deck) {
-  const slidesHtml = layoutDeck(deck).map((placed, i) => {
-    const items = placed.map(placedToHtml).join(`
+var ROLE_STYLES = {
+  title: { fontSize: 36, bold: true },
+  subtitle: { fontSize: 22 },
+  heading: { fontSize: 22, bold: true },
+  text: { fontSize: 16 },
+  bullet: { fontSize: 18 }
+};
+var TEXT_ALIGN = {
+  start: "left",
+  center: "center",
+  end: "right"
+};
+var SIZE_TOKENS = { sm: 0.85, md: 1, lg: 1.25 };
+function normalize(input) {
+  if (Array.isArray(input))
+    return { theme: {}, slides: layoutDeck(input) };
+  return { theme: input.theme ?? {}, slides: layoutDeck(input.slides) };
+}
+function renderHtml(input) {
+  const { theme, slides } = normalize(input);
+  const slidesHtml = slides.map((slideLayout, i) => {
+    const items = slideLayout.placed.map((p) => placedToHtml(p, theme)).join(`
 `);
-    const maxStep = placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
-    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}">${items}<div class="step-badge"></div></section>`;
+    const maxStep = slideLayout.placed.reduce((m, p) => Math.max(m, maxStepOf(p)), 0);
+    const bg = slideLayout.background ?? theme.background;
+    const bgStyle = bgToCss(bg);
+    const themeText = theme.text ? `color:${escapeAttr(theme.text)};` : "";
+    const themeFont = theme.fonts?.body ? `font-family:${escapeAttr(theme.fonts.body)};` : "";
+    return `<section class="slide" data-index="${i}" data-current-step="0" data-max-step="${maxStep}" style="${bgStyle}${themeText}${themeFont}">${items}<div class="step-badge"></div></section>`;
   }).join(`
 `);
   return `<!doctype html>
@@ -2205,18 +2259,21 @@ function renderHtml(deck) {
     overflow: hidden;
     outline: 2px solid transparent;
     transition: outline-color 0.15s;
+    background-size: cover;
+    background-position: center;
   }
   .slide.focused { outline-color: #4a9eff; }
   .placed { position: absolute; display: flex; flex-direction: column; }
   .role-title { font-size: 36px; font-weight: 700; justify-content: center; }
-  .role-subtitle { font-size: 22px; color: #555; justify-content: center; }
+  .role-subtitle { font-size: 22px; justify-content: center; }
   .role-heading { font-size: 22px; font-weight: 600; justify-content: center; }
   .role-text { font-size: 16px; }
-  .role-quote { font-size: 22px; font-style: italic; text-align: center; justify-content: center; }
-  .role-attribution { font-size: 14px; color: #666; text-align: center; justify-content: center; }
+  .role-bullet { font-size: 18px; }
   .bullets { font-size: 18px; padding-left: 1.2em; margin: 0; list-style: disc; }
   .bullets li { margin: 0 0 6px 0; }
   img.placed { object-fit: contain; }
+  img.fit-cover { object-fit: cover; }
+  img.fit-fill { object-fit: fill; }
   .stepped-hidden { visibility: hidden; }
   .step-badge {
     position: absolute; right: 8px; bottom: 8px;
@@ -2289,22 +2346,70 @@ ${slidesHtml}
 </body>
 </html>`;
 }
+function bgToCss(bg) {
+  if (bg === undefined)
+    return "";
+  if (typeof bg === "string")
+    return `background-color:${escapeAttr(bg)};`;
+  return `background-image:url(${JSON.stringify(bg.image)});`;
+}
 function maxStepOf(p) {
   if (p.kind === "bullets") {
     return p.bullets.reduce((m, b) => Math.max(m, b.step), p.step);
   }
   return p.step;
 }
-function placedToHtml(p) {
+function placedToHtml(p, theme) {
   const inset = `left:${p.x * SCALE}px;top:${p.y * SCALE}px;width:${p.w * SCALE}px;height:${p.h * SCALE}px`;
   if (p.kind === "image") {
-    return `<img class="placed" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
+    const fitClass = p.fit === "cover" ? " fit-cover" : p.fit === "fill" ? " fit-fill" : "";
+    return `<img class="placed${fitClass}" data-step="${p.step}" src="${escapeAttr(p.src)}" alt="${escapeAttr(p.alt ?? "")}" style="${inset}">`;
   }
   if (p.kind === "bullets") {
-    const lis = p.bullets.map((b) => `<li data-step="${b.step}">${escapeText(b.text)}</li>`).join("");
+    const lis = p.bullets.map((b) => {
+      const a = b.align && TEXT_ALIGN[b.align] ? `text-align:${TEXT_ALIGN[b.align]};` : "";
+      return `<li data-step="${b.step}" style="${a}">${runsToHtml(b.runs, "bullet", theme)}</li>`;
+    }).join("");
     return `<ul class="placed bullets" data-step="${p.step}" style="${inset}">${lis}</ul>`;
   }
-  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}">${escapeText(p.text)}</div>`;
+  const ta = p.align && TEXT_ALIGN[p.align] ? `text-align:${TEXT_ALIGN[p.align]};` : "";
+  return `<div class="placed role-${p.role}" data-step="${p.step}" style="${inset}${ta}">${runsToHtml(p.runs, p.role, theme)}</div>`;
+}
+function runsToHtml(runs, role, theme) {
+  return runs.map((r) => {
+    const text = escapeText(r.text).replace(/\n/g, "<br/>");
+    const css = runStyleCss(r.style, role, theme);
+    if (!css)
+      return text;
+    return `<span style="${css}">${text}</span>`;
+  }).join("");
+}
+function runStyleCss(style, role, theme) {
+  if (!style)
+    return "";
+  const parts = [];
+  const base = ROLE_STYLES[role].fontSize;
+  let size;
+  if (style.size !== undefined) {
+    size = typeof style.size === "number" ? style.size : base * SIZE_TOKENS[style.size];
+  }
+  if (style.cite) {
+    size = (size ?? base) * 0.75;
+  }
+  if (size !== undefined)
+    parts.push(`font-size:${size}px`);
+  if (style.weight !== undefined)
+    parts.push(`font-weight:${style.weight}`);
+  if (style.italic)
+    parts.push(`font-style:italic`);
+  if (style.font)
+    parts.push(`font-family:${style.font}`);
+  let color = style.color;
+  if (style.cite && !color && theme.accent)
+    color = theme.accent;
+  if (color)
+    parts.push(`color:${color}`);
+  return parts.join(";");
 }
 function escapeText(s) {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
@@ -2320,18 +2425,49 @@ async function loadDeck(entry) {
   const mod = await import(url);
   const deckFn = mod.default;
   if (typeof deckFn !== "function") {
-    throw new Error(`deck entry must default-export a function returning Slide[]: ${entry}`);
+    throw new Error(`deck entry must default-export a function returning Slide[] or { theme?, slides }: ${entry}`);
   }
   const result = await deckFn();
-  if (!Array.isArray(result)) {
-    throw new Error(`deck function must return an array of <Slide> elements`);
+  return normalizeResult(result);
+}
+function normalizeResult(result) {
+  if (Array.isArray(result)) {
+    const slides = flattenSlides(result);
+    assertSlides(slides);
+    return { slides };
   }
-  for (const s of result) {
+  if (result && typeof result === "object" && "slides" in result) {
+    const r = result;
+    if (!Array.isArray(r.slides)) {
+      throw new Error(`deck object's "slides" property must be an array of <Slide> elements`);
+    }
+    const slides = flattenSlides(r.slides);
+    assertSlides(slides);
+    return { theme: r.theme, slides };
+  }
+  throw new Error(`deck function must return an array of <Slide> elements or { theme?, slides }`);
+}
+function flattenSlides(input) {
+  const out = [];
+  function visit(c) {
+    if (c == null || c === false || c === true)
+      return;
+    if (Array.isArray(c)) {
+      for (const x of c)
+        visit(x);
+      return;
+    }
+    out.push(c);
+  }
+  visit(input);
+  return out;
+}
+function assertSlides(arr) {
+  for (const s of arr) {
     if (!s || typeof s !== "object" || s.kind !== "slide") {
       throw new Error("deck array must contain only <Slide> elements");
     }
   }
-  return result;
 }
 
 // src/slides_client.ts
@@ -2357,17 +2493,76 @@ function presentationUrl(id) {
 // src/slides_reader.ts
 function presentationToDeck(p) {
   const slides = p.slides ?? [];
-  return slides.map(slideToNode);
+  const pageW = p.pageSize?.width?.magnitude ?? 0;
+  const pageH = p.pageSize?.height?.magnitude ?? 0;
+  const theme = inferTheme(p);
+  const slideNodes = slides.map((s) => slideToNode(s, pageW, pageH, theme));
+  const result = { slides: slideNodes };
+  if (Object.keys(theme).length > 0)
+    result.theme = theme;
+  return result;
 }
-function slideToNode(slide) {
+function slideToNode(slide, pageW, pageH, theme) {
   const elements = (slide.pageElements ?? []).slice().sort((a, b) => yOf(a) - yOf(b));
-  const children = [];
+  let background;
+  const contentEls = [];
   for (const el of elements) {
+    if (isFullPageImage(el, pageW, pageH)) {
+      const url = el.image?.sourceUrl ?? el.image?.contentUrl;
+      if (url && background === undefined) {
+        background = { image: url };
+        continue;
+      }
+    }
+    contentEls.push(el);
+  }
+  const bgFill = slide.pageProperties?.pageBackgroundFill;
+  if (background === undefined && bgFill) {
+    const rgb = bgFill.solidFill?.color?.rgbColor;
+    if (rgb) {
+      const hex = rgbToHex(rgb);
+      if (hex && hex !== theme.background)
+        background = hex;
+    } else if (bgFill.stretchedPictureFill?.contentUrl) {
+      background = { image: bgFill.stretchedPictureFill.contentUrl };
+    }
+  }
+  const children = [];
+  for (const el of contentEls) {
     const child = elementToChild(el);
     if (child)
       children.push(child);
   }
-  return { kind: "slide", children };
+  const node = { kind: "slide", children };
+  if (background !== undefined)
+    node.background = background;
+  return node;
+}
+function isFullPageImage(el, pageW, pageH) {
+  if (!el.image)
+    return false;
+  if (pageW <= 0 || pageH <= 0)
+    return false;
+  const w = el.size?.width?.magnitude;
+  const h = el.size?.height?.magnitude;
+  const sx = el.transform?.scaleX ?? 1;
+  const sy = el.transform?.scaleY ?? 1;
+  const tx = el.transform?.translateX ?? 0;
+  const ty = el.transform?.translateY ?? 0;
+  if (!w || !h)
+    return false;
+  const rw = w * sx;
+  const rh = h * sy;
+  const tol = 0.02;
+  if (Math.abs(tx) > pageW * tol)
+    return false;
+  if (Math.abs(ty) > pageH * tol)
+    return false;
+  if (Math.abs(rw - pageW) > pageW * tol)
+    return false;
+  if (Math.abs(rh - pageH) > pageH * tol)
+    return false;
+  return true;
 }
 function yOf(el) {
   return el.transform?.translateY ?? 0;
@@ -2387,66 +2582,149 @@ function elementToChild(el) {
     return null;
   const allBullets = paragraphs.every((p) => p.bullet);
   if (allBullets && paragraphs.length > 0) {
-    const bullets = paragraphs.map((p) => ({ kind: "bullet", text: p.text }));
+    const bullets = paragraphs.map((p) => ({
+      kind: "bullet",
+      runs: collapseRuns(p.runs, p.dominant)
+    }));
     const node = { kind: "bullets", children: bullets };
     return node;
   }
-  const text = paragraphs.map((p) => p.text).join(`
-`);
+  const allRuns = [];
+  for (let i = 0;i < paragraphs.length; i++) {
+    const p = paragraphs[i];
+    allRuns.push(...p.runs);
+    if (i < paragraphs.length - 1)
+      allRuns.push({ text: `
+` });
+  }
+  const dominant = paragraphs[0].dominant;
+  const runs = collapseRuns(allRuns, dominant);
+  const text = runs.map((r) => r.text).join("");
   if (!text.trim())
     return null;
-  const style = paragraphs[0].style;
-  const role = classifyText(style);
+  const role = classifyText(dominant);
   switch (role) {
     case "title":
-      return { kind: "title", text };
+      return { kind: "title", runs };
     case "subtitle":
-      return { kind: "subtitle", text };
+      return { kind: "subtitle", runs };
     case "heading":
-      return { kind: "heading", text };
-    case "quote":
-      return { kind: "quote", text };
+      return { kind: "heading", runs };
     default:
-      return { kind: "text", text };
+      return { kind: "text", runs };
   }
 }
 function parseParagraphs(text) {
   const elements = text.textElements ?? [];
   const paragraphs = [];
-  let current = { text: "", bullet: false, style: {} };
+  let currentRuns = [];
+  let currentBullet = false;
+  let dominant = {};
+  function flush() {
+    if (currentRuns.length === 0)
+      return;
+    paragraphs.push({ bullet: currentBullet, runs: currentRuns, dominant });
+    currentRuns = [];
+    dominant = {};
+  }
   for (const e of elements) {
     if (e.paragraphMarker) {
-      current.bullet = !!e.paragraphMarker.bullet;
+      flush();
+      currentBullet = !!e.paragraphMarker.bullet;
     } else if (e.textRun) {
       const content = e.textRun.content ?? "";
-      const style = e.textRun.style;
-      if (style && Object.keys(current.style).length === 0) {
-        if (style.fontSize?.magnitude)
-          current.style.fontSize = style.fontSize.magnitude;
-        if (style.bold)
-          current.style.bold = true;
-        if (style.italic)
-          current.style.italic = true;
-      }
+      const raw = textRunStyle(e.textRun.style ?? {});
+      if (Object.keys(dominant).length === 0)
+        dominant = raw;
       const lines = content.split(`
 `);
       lines.forEach((line, i) => {
-        current.text += line;
+        if (line.length > 0) {
+          currentRuns.push(toRun(line, raw));
+        }
         if (i < lines.length - 1) {
-          paragraphs.push(current);
-          current = { text: "", bullet: current.bullet, style: {} };
+          flush();
+          currentBullet = currentBullet;
         }
       });
     }
   }
-  if (current.text.length > 0)
-    paragraphs.push(current);
-  return paragraphs.filter((p) => p.text.length > 0);
+  flush();
+  return paragraphs.filter((p) => p.runs.some((r) => r.text.length > 0));
+}
+function textRunStyle(style) {
+  const out = {};
+  if (style.fontSize?.magnitude)
+    out.fontSize = style.fontSize.magnitude;
+  if (style.bold)
+    out.bold = true;
+  if (style.italic)
+    out.italic = true;
+  if (style.fontFamily)
+    out.fontFamily = style.fontFamily;
+  const rgb = style.foregroundColor?.opaqueColor?.rgbColor;
+  if (rgb) {
+    const hex = rgbToHex(rgb);
+    if (hex)
+      out.color = hex;
+  }
+  return out;
+}
+function toRun(text, raw) {
+  const style = {};
+  if (raw.fontSize !== undefined)
+    style.size = raw.fontSize;
+  if (raw.bold)
+    style.weight = 700;
+  if (raw.italic)
+    style.italic = true;
+  if (raw.fontFamily)
+    style.font = raw.fontFamily;
+  if (raw.color)
+    style.color = raw.color;
+  if (Object.keys(style).length === 0)
+    return { text };
+  return { text, style };
+}
+function collapseRuns(runs, dominant) {
+  const out = [];
+  for (const r of runs) {
+    const filtered = filterToOverrides(r.style, dominant);
+    const stripped = filtered ? { text: r.text, style: filtered } : { text: r.text };
+    const last = out[out.length - 1];
+    if (last && sameStyle(last.style, stripped.style)) {
+      last.text += stripped.text;
+    } else {
+      out.push(stripped);
+    }
+  }
+  return out;
+}
+function filterToOverrides(style, dominant) {
+  if (!style)
+    return;
+  const out = {};
+  if (style.size !== undefined && style.size !== dominant.fontSize)
+    out.size = style.size;
+  if (style.weight !== undefined && style.weight === 700 !== !!dominant.bold)
+    out.weight = style.weight;
+  if (style.italic !== undefined && !!style.italic !== !!dominant.italic)
+    out.italic = style.italic;
+  if (style.font !== undefined && style.font !== dominant.fontFamily)
+    out.font = style.font;
+  if (style.color !== undefined && style.color !== dominant.color)
+    out.color = style.color;
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+function sameStyle(a, b) {
+  if (!a && !b)
+    return true;
+  if (!a || !b)
+    return false;
+  return a.size === b.size && a.weight === b.weight && a.italic === b.italic && a.font === b.font && a.color === b.color;
 }
 function classifyText(style) {
   const size = style.fontSize ?? 14;
-  if (style.italic && size >= 18)
-    return "quote";
   if (style.bold && size >= 30)
     return "title";
   if (style.bold)
@@ -2455,24 +2733,108 @@ function classifyText(style) {
     return "subtitle";
   return "text";
 }
+function rgbToHex(rgb) {
+  const r = Math.round((rgb.red ?? 0) * 255);
+  const g = Math.round((rgb.green ?? 0) * 255);
+  const b = Math.round((rgb.blue ?? 0) * 255);
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+function inferTheme(p) {
+  const theme = {};
+  const masterBg = (p.masters ?? []).map((m) => m.pageProperties?.pageBackgroundFill?.solidFill?.color?.rgbColor).find((c) => c !== undefined);
+  if (masterBg) {
+    const hex = rgbToHex(masterBg);
+    if (hex)
+      theme.background = hex;
+  }
+  const colors = [];
+  const fonts = [];
+  for (const slide of p.slides ?? []) {
+    for (const el of slide.pageElements ?? []) {
+      const els = el.shape?.text?.textElements ?? [];
+      for (const e of els) {
+        const s = e.textRun?.style;
+        if (!s)
+          continue;
+        const rgb = s.foregroundColor?.opaqueColor?.rgbColor;
+        if (rgb) {
+          const hex = rgbToHex(rgb);
+          if (hex)
+            colors.push(hex);
+        }
+        if (s.fontFamily)
+          fonts.push(s.fontFamily);
+      }
+    }
+  }
+  const modeColor = mode(colors);
+  if (modeColor)
+    theme.text = modeColor;
+  const modeFont = mode(fonts);
+  if (modeFont)
+    theme.fonts = { body: modeFont };
+  return theme;
+}
+function mode(arr) {
+  if (arr.length === 0)
+    return;
+  const counts = new Map;
+  for (const v of arr)
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best;
+  let bestCount = 0;
+  for (const [v, c] of counts) {
+    if (c > bestCount) {
+      best = v;
+      bestCount = c;
+    }
+  }
+  return best;
+}
 function deckToTsx(deck) {
   const used = new Set(["Slide"]);
-  const slidesSrc = deck.map((s) => renderSlide(s, used)).join(`,
+  const slidesSrc = deck.slides.map((s) => renderSlide(s, used)).join(`,
     `);
+  const themeSrc = deck.theme && Object.keys(deck.theme).length > 0 ? `const theme = ${stringifyTheme(deck.theme)};
+
+` : "";
+  const returnExpr = deck.theme && Object.keys(deck.theme).length > 0 ? `{ theme, slides: [
+    ${slidesSrc},
+  ] }` : `[
+    ${slidesSrc},
+  ]`;
   const imports = Array.from(used).sort().join(", ");
   return `import { ${imports} } from "slidekick";
 
 export default function deck() {
-  return [
-    ${slidesSrc},
-  ];
+  ${themeSrc.trim()}${themeSrc ? `
+
+  ` : ""}return ${returnExpr};
 }
 `;
 }
+function stringifyTheme(theme) {
+  return JSON.stringify(theme, null, 2).replace(/\n/g, `
+  `);
+}
 function renderSlide(slide, used) {
+  const props = [];
+  if (slide.background !== undefined) {
+    if (typeof slide.background === "string") {
+      props.push(` background=${JSON.stringify(slide.background)}`);
+    } else {
+      props.push(` background={{ image: ${JSON.stringify(slide.background.image)} }}`);
+    }
+  }
+  if (slide.align)
+    props.push(` align=${JSON.stringify(slide.align)}`);
+  const open = `<Slide${props.join("")}>`;
+  if (slide.children.length === 0) {
+    return `<Slide${props.join("")} />`;
+  }
   const body = slide.children.map((c) => renderChild(c, used, "      ")).join(`
 `);
-  return `<Slide>
+  return `${open}
 ${body}
     </Slide>`;
 }
@@ -2480,30 +2842,26 @@ function renderChild(node, used, indent) {
   switch (node.kind) {
     case "title":
       used.add("Title");
-      return `${indent}<Title>${escapeJsxText(node.text)}</Title>`;
+      return `${indent}<Title>${renderRuns(node.runs, used)}</Title>`;
     case "subtitle":
       used.add("Subtitle");
-      return `${indent}<Subtitle>${escapeJsxText(node.text)}</Subtitle>`;
+      return `${indent}<Subtitle>${renderRuns(node.runs, used)}</Subtitle>`;
     case "heading":
       used.add("Heading");
-      return `${indent}<Heading>${escapeJsxText(node.text)}</Heading>`;
+      return `${indent}<Heading>${renderRuns(node.runs, used)}</Heading>`;
     case "text":
       used.add("Text");
-      return `${indent}<Text>${escapeJsxText(node.text)}</Text>`;
-    case "quote": {
-      used.add("Quote");
-      const attr = node.attribution ? ` attribution=${JSON.stringify(node.attribution)}` : "";
-      return `${indent}<Quote${attr}>${escapeJsxText(node.text)}</Quote>`;
-    }
+      return `${indent}<Text>${renderRuns(node.runs, used)}</Text>`;
     case "image": {
       used.add("Image");
       const alt = node.alt ? ` alt=${JSON.stringify(node.alt)}` : "";
-      return `${indent}<Image src=${JSON.stringify(node.src)}${alt} />`;
+      const fit = node.fit && node.fit !== "contain" ? ` fit=${JSON.stringify(node.fit)}` : "";
+      return `${indent}<Image src=${JSON.stringify(node.src)}${alt}${fit} />`;
     }
     case "bullets": {
       used.add("Bullets");
       used.add("Bullet");
-      const items = node.children.map((b) => `${indent}  <Bullet>${escapeJsxText(b.text)}</Bullet>`).join(`
+      const items = node.children.map((b) => `${indent}  <Bullet>${renderRuns(b.runs, used)}</Bullet>`).join(`
 `);
       return `${indent}<Bullets>
 ${items}
@@ -2535,28 +2893,59 @@ ${indent}</Group>`;
     }
   }
 }
+function renderRuns(runs, used) {
+  return runs.map((r) => {
+    const text = escapeJsxText(r.text);
+    if (!r.style)
+      return text;
+    used.add("Span");
+    const attrs = [];
+    if (r.style.size !== undefined) {
+      attrs.push(typeof r.style.size === "number" ? `size={${r.style.size}}` : `size=${JSON.stringify(r.style.size)}`);
+    }
+    if (r.style.weight !== undefined)
+      attrs.push(`weight={${r.style.weight}}`);
+    if (r.style.italic)
+      attrs.push(`italic`);
+    if (r.style.font)
+      attrs.push(`font=${JSON.stringify(r.style.font)}`);
+    if (r.style.color)
+      attrs.push(`color=${JSON.stringify(r.style.color)}`);
+    return `<Span ${attrs.join(" ")}>${text}</Span>`;
+  }).join("");
+}
 function escapeJsxText(s) {
   return s.replace(/[{}<>]/g, (c) => `{${JSON.stringify(c)}}`);
 }
 
 // src/slides_writer.ts
 var DEFAULT_PAGE = { widthPt: SLIDE_W * 72, heightPt: SLIDE_H * 72 };
-var ROLE_STYLE = {
+var DEFAULT_ROLE_STYLE = {
   title: { fontSize: 36, bold: true },
   subtitle: { fontSize: 22 },
   heading: { fontSize: 22, bold: true },
   text: { fontSize: 16 },
-  quote: { fontSize: 22, italic: true, alignment: "CENTER" },
-  attribution: { fontSize: 14, alignment: "CENTER" }
+  bullet: { fontSize: 18 }
 };
-var BULLETS_STYLE = { fontSize: 18 };
-function deckToRequests(deck, opts = {}) {
+var PARAGRAPH_ALIGN = {
+  start: "START",
+  center: "CENTER",
+  end: "END"
+};
+var SIZE_TOKENS2 = { sm: 0.85, md: 1, lg: 1.25 };
+function normalizeDeck(input) {
+  if (Array.isArray(input))
+    return { theme: {}, slides: input };
+  return { theme: input.theme ?? {}, slides: input.slides };
+}
+function deckToRequests(input, opts = {}) {
+  const { theme, slides } = normalizeDeck(input);
   const page = opts.page ?? DEFAULT_PAGE;
   const sx = page.widthPt / SLIDE_W;
   const sy = page.heightPt / SLIDE_H;
-  const placed = layoutDeck(deck);
+  const layouts = layoutDeck(slides);
   const requests = [];
-  placed.forEach((slidePlaced, slideIdx) => {
+  layouts.forEach((slideLayout, slideIdx) => {
     const slideId = `sk_s_${slideIdx}`;
     requests.push({
       createSlide: {
@@ -2564,18 +2953,51 @@ function deckToRequests(deck, opts = {}) {
         slideLayoutReference: { predefinedLayout: "BLANK" }
       }
     });
-    slidePlaced.forEach((p, i) => {
+    const bg = slideLayout.background ?? theme.background;
+    if (bg !== undefined)
+      emitPageBackground(requests, slideId, bg);
+    slideLayout.placed.forEach((p, i) => {
       const elementId = `sk_e_${slideIdx}_${i}`;
       const x = p.x * sx;
       const y = p.y * sy;
       const w = p.w * sx;
       const h = p.h * sy;
-      emitElement(requests, slideId, elementId, p, x, y, w, h);
+      emitElement(requests, slideId, elementId, p, x, y, w, h, theme);
     });
   });
   return requests;
 }
-function emitElement(out, slideId, elementId, p, x, y, w, h) {
+function emitPageBackground(out, slideId, bg) {
+  if (typeof bg === "string") {
+    const color = parseColor(bg);
+    if (!color)
+      return;
+    out.push({
+      updatePageProperties: {
+        objectId: slideId,
+        pageProperties: {
+          pageBackgroundFill: {
+            solidFill: { color: { rgbColor: color }, alpha: 1 }
+          }
+        },
+        fields: "pageBackgroundFill.solidFill.color,pageBackgroundFill.solidFill.alpha"
+      }
+    });
+    return;
+  }
+  out.push({
+    updatePageProperties: {
+      objectId: slideId,
+      pageProperties: {
+        pageBackgroundFill: {
+          stretchedPictureFill: { contentUrl: bg.image }
+        }
+      },
+      fields: "pageBackgroundFill.stretchedPictureFill.contentUrl"
+    }
+  });
+}
+function emitElement(out, slideId, elementId, p, x, y, w, h, theme) {
   const elementProperties = {
     pageObjectId: slideId,
     size: {
@@ -2586,24 +3008,76 @@ function emitElement(out, slideId, elementId, p, x, y, w, h) {
   };
   if (p.kind === "image") {
     out.push({ createImage: { objectId: elementId, url: p.src, elementProperties } });
+    if (p.crop)
+      emitCrop(out, elementId, p.crop);
     return;
   }
   out.push({
     createShape: { objectId: elementId, shapeType: "TEXT_BOX", elementProperties }
   });
   if (p.kind === "text") {
-    if (p.text.length > 0) {
-      out.push({ insertText: { objectId: elementId, text: p.text, insertionIndex: 0 } });
-      applyStyle(out, elementId, ROLE_STYLE[p.role], p.text.length);
-    }
+    emitRuns(out, elementId, p.runs, p.role, theme, p.align);
     return;
   }
-  const text = p.bullets.map((b) => b.text).join(`
+  emitBullets(out, elementId, p.bullets, theme);
+}
+function emitRuns(out, elementId, runs, role, theme, paragraphAlign) {
+  const text = runs.map((r) => r.text).join("");
+  if (text.length === 0)
+    return;
+  out.push({ insertText: { objectId: elementId, text, insertionIndex: 0 } });
+  if (paragraphAlign && PARAGRAPH_ALIGN[paragraphAlign]) {
+    out.push({
+      updateParagraphStyle: {
+        objectId: elementId,
+        style: { alignment: PARAGRAPH_ALIGN[paragraphAlign] },
+        fields: "alignment",
+        textRange: { type: "ALL" }
+      }
+    });
+  }
+  let cursor = 0;
+  for (const run of runs) {
+    const len = run.text.length;
+    if (len > 0) {
+      const merged = mergeStyles(role, theme, run.style);
+      pushTextStyle(out, elementId, merged, cursor, cursor + len);
+    }
+    cursor += len;
+  }
+}
+function emitBullets(out, elementId, bullets, theme) {
+  const lineTexts = bullets.map((b) => b.runs.map((r) => r.text).join(""));
+  const text = lineTexts.join(`
 `);
   if (text.length === 0)
     return;
   out.push({ insertText: { objectId: elementId, text, insertionIndex: 0 } });
-  applyStyle(out, elementId, BULLETS_STYLE, text.length);
+  let cursor = 0;
+  for (let i = 0;i < bullets.length; i++) {
+    const b = bullets[i];
+    const lineLen = lineTexts[i].length;
+    if (b.align && PARAGRAPH_ALIGN[b.align]) {
+      out.push({
+        updateParagraphStyle: {
+          objectId: elementId,
+          style: { alignment: PARAGRAPH_ALIGN[b.align] },
+          fields: "alignment",
+          textRange: { type: "FIXED_RANGE", startIndex: cursor, endIndex: cursor + lineLen }
+        }
+      });
+    }
+    for (const run of b.runs) {
+      const len = run.text.length;
+      if (len > 0) {
+        const merged = mergeStyles("bullet", theme, run.style);
+        pushTextStyle(out, elementId, merged, cursor, cursor + len);
+      }
+      cursor += len;
+    }
+    if (i < bullets.length - 1)
+      cursor += 1;
+  }
   out.push({
     createParagraphBullets: {
       objectId: elementId,
@@ -2612,39 +3086,105 @@ function emitElement(out, slideId, elementId, p, x, y, w, h) {
     }
   });
 }
-function applyStyle(out, objectId, style, textLength) {
-  if (textLength === 0)
-    return;
-  const fields = ["fontSize"];
-  const textStyle = {
-    fontSize: { magnitude: style.fontSize, unit: "PT" }
-  };
-  if (style.bold) {
-    textStyle.bold = true;
-    fields.push("bold");
+function roleBaseStyle(role, theme) {
+  const base = DEFAULT_ROLE_STYLE[role];
+  const sizeOverride = theme.sizes?.[role];
+  return { ...base, fontSize: sizeOverride ?? base.fontSize };
+}
+function mergeStyles(role, theme, run) {
+  const base = roleBaseStyle(role, theme);
+  const isDisplay = role === "title" || role === "heading";
+  const themeFont = isDisplay ? theme.fonts?.display ?? theme.fonts?.body : theme.fonts?.body;
+  const themeColor = theme.text;
+  let fontSize = base.fontSize;
+  let bold = !!base.bold;
+  let italic = !!base.italic;
+  let font = themeFont;
+  let color = themeColor;
+  if (run) {
+    if (run.size !== undefined) {
+      fontSize = resolveSize(run.size, base.fontSize);
+    }
+    if (run.weight !== undefined)
+      bold = run.weight >= 700;
+    if (run.italic !== undefined)
+      italic = run.italic;
+    if (run.font !== undefined)
+      font = run.font;
+    if (run.color !== undefined)
+      color = run.color;
+    if (run.cite) {
+      fontSize = fontSize * 0.75;
+      if (run.color === undefined && theme.accent)
+        color = theme.accent;
+    }
   }
-  if (style.italic) {
-    textStyle.italic = true;
-    fields.push("italic");
+  return { fontSize, bold, italic, font, color };
+}
+function resolveSize(size, base) {
+  if (typeof size === "number")
+    return size;
+  const factor = SIZE_TOKENS2[size];
+  return base * factor;
+}
+function pushTextStyle(out, objectId, style, startIndex, endIndex) {
+  const fields = ["fontSize", "bold", "italic"];
+  const textStyle = {
+    fontSize: { magnitude: style.fontSize, unit: "PT" },
+    bold: style.bold,
+    italic: style.italic
+  };
+  if (style.font) {
+    textStyle.fontFamily = style.font;
+    fields.push("fontFamily");
+  }
+  if (style.color) {
+    const rgb = parseColor(style.color);
+    if (rgb) {
+      textStyle.foregroundColor = { opaqueColor: { rgbColor: rgb } };
+      fields.push("foregroundColor");
+    }
   }
   out.push({
     updateTextStyle: {
       objectId,
       style: textStyle,
       fields: fields.join(","),
-      textRange: { type: "ALL" }
+      textRange: { type: "FIXED_RANGE", startIndex, endIndex }
     }
   });
-  if (style.alignment) {
-    out.push({
-      updateParagraphStyle: {
-        objectId,
-        style: { alignment: style.alignment },
-        fields: "alignment",
-        textRange: { type: "ALL" }
-      }
-    });
+}
+function emitCrop(out, objectId, crop) {
+  out.push({
+    updateImageProperties: {
+      objectId,
+      imageProperties: {
+        cropProperties: {
+          leftOffset: crop.left ?? 0,
+          rightOffset: crop.right ?? 0,
+          topOffset: crop.top ?? 0,
+          bottomOffset: crop.bottom ?? 0
+        }
+      },
+      fields: "cropProperties.leftOffset,cropProperties.rightOffset,cropProperties.topOffset,cropProperties.bottomOffset"
+    }
+  });
+}
+function parseColor(c) {
+  let s = c.trim();
+  if (s.startsWith("#"))
+    s = s.slice(1);
+  if (/^[0-9a-fA-F]{3}$/.test(s)) {
+    s = s.split("").map((ch) => ch + ch).join("");
   }
+  if (/^[0-9a-fA-F]{6}$/.test(s)) {
+    return {
+      red: parseInt(s.slice(0, 2), 16) / 255,
+      green: parseInt(s.slice(2, 4), 16) / 255,
+      blue: parseInt(s.slice(4, 6), 16) / 255
+    };
+  }
+  return null;
 }
 function deleteAllSlidesRequests(presentation) {
   const slides = presentation.slides ?? [];
