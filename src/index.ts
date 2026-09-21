@@ -9,6 +9,7 @@ export {
   Image,
   Slide,
   Span,
+  Strike,
   Strong,
   Subtitle,
   Text,

@@ -275,6 +275,7 @@ interface ResolvedStyle {
   fontSize: number;
   bold: boolean;
   italic: boolean;
+  strike: boolean;
   font?: string;
   color?: Color;
 }
@@ -300,6 +301,7 @@ function mergeStyles(
   let fontSize = base.fontSize;
   let bold = !!base.bold;
   let italic = !!base.italic;
+  let strike = false;
   let font: string | undefined = themeFont;
   let color: Color | undefined = themeColor;
 
@@ -309,6 +311,7 @@ function mergeStyles(
     }
     if (run.weight !== undefined) bold = run.weight >= 700;
     if (run.italic !== undefined) italic = run.italic;
+    if (run.strike !== undefined) strike = run.strike;
     if (run.font !== undefined) font = run.font;
     if (run.color !== undefined) color = run.color;
     if (run.cite) {
@@ -317,7 +320,7 @@ function mergeStyles(
     }
   }
 
-  return { fontSize, bold, italic, font, color };
+  return { fontSize, bold, italic, strike, font, color };
 }
 
 function resolveSize(size: number | SizeToken, base: number): number {
@@ -333,11 +336,12 @@ function pushTextStyle(
   startIndex: number,
   endIndex: number,
 ): void {
-  const fields: string[] = ["fontSize", "bold", "italic"];
+  const fields: string[] = ["fontSize", "bold", "italic", "strikethrough"];
   const textStyle: slides_v1.Schema$TextStyle = {
     fontSize: { magnitude: style.fontSize, unit: "PT" },
     bold: style.bold,
     italic: style.italic,
+    strikethrough: style.strike,
   };
   if (style.font) {
     textStyle.fontFamily = style.font;

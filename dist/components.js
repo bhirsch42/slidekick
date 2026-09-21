@@ -17,6 +17,7 @@ function stylesEqual(a, b) {
     return (a.size === b.size &&
         a.weight === b.weight &&
         a.italic === b.italic &&
+        a.strike === b.strike &&
         a.font === b.font &&
         a.color === b.color &&
         !!a.cite === !!b.cite);
@@ -28,6 +29,7 @@ function mergeStyle(a, b) {
         size: b.size ?? a.size,
         weight: b.weight ?? a.weight,
         italic: b.italic ?? a.italic,
+        strike: b.strike ?? a.strike,
         font: b.font ?? a.font,
         color: b.color ?? a.color,
         cite: b.cite ?? a.cite,
@@ -37,6 +39,7 @@ function isEmptyStyle(s) {
     return (s.size === undefined &&
         s.weight === undefined &&
         s.italic === undefined &&
+        s.strike === undefined &&
         s.font === undefined &&
         s.color === undefined &&
         !s.cite);
@@ -160,6 +163,8 @@ export function Span(props) {
         style.weight = props.weight;
     if (props.italic !== undefined)
         style.italic = props.italic;
+    if (props.strike !== undefined)
+        style.strike = props.strike;
     if (props.font !== undefined)
         style.font = props.font;
     if (props.color !== undefined)
@@ -171,6 +176,9 @@ export function Em(props) {
 }
 export function Strong(props) {
     return { kind: "span", children: props.children, style: { weight: 700 } };
+}
+export function Strike(props) {
+    return { kind: "span", children: props.children, style: { strike: true } };
 }
 export function Cite(props) {
     return {

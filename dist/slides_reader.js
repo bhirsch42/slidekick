@@ -249,6 +249,8 @@ function textRunStyle(style) {
         out.bold = true;
     if (style.italic)
         out.italic = true;
+    if (style.strikethrough)
+        out.strike = true;
     if (style.fontFamily)
         out.fontFamily = style.fontFamily;
     const rgb = style.foregroundColor?.opaqueColor?.rgbColor;
@@ -267,6 +269,8 @@ function toRun(text, raw) {
         style.weight = 700;
     if (raw.italic)
         style.italic = true;
+    if (raw.strike)
+        style.strike = true;
     if (raw.fontFamily)
         style.font = raw.fontFamily;
     if (raw.color)
@@ -302,6 +306,8 @@ function filterToOverrides(style, dominant) {
         out.weight = style.weight;
     if (style.italic !== undefined && !!style.italic !== !!dominant.italic)
         out.italic = style.italic;
+    if (style.strike !== undefined && !!style.strike !== !!dominant.strike)
+        out.strike = style.strike;
     if (style.font !== undefined && style.font !== dominant.fontFamily)
         out.font = style.font;
     if (style.color !== undefined && style.color !== dominant.color)
@@ -316,6 +322,7 @@ function sameStyle(a, b) {
     return (a.size === b.size &&
         a.weight === b.weight &&
         a.italic === b.italic &&
+        a.strike === b.strike &&
         a.font === b.font &&
         a.color === b.color);
 }

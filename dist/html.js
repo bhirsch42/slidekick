@@ -162,6 +162,8 @@ function runStyleCss(style, role, theme) {
         parts.push(`font-weight:${style.weight}`);
     if (style.italic)
         parts.push(`font-style:italic`);
+    if (style.strike)
+        parts.push(`text-decoration:line-through`);
     if (style.font)
         parts.push(`font-family:${style.font}`);
     let color = style.color;

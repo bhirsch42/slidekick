@@ -46,6 +46,7 @@ function stylesEqual(
     a.size === b.size &&
     a.weight === b.weight &&
     a.italic === b.italic &&
+    a.strike === b.strike &&
     a.font === b.font &&
     a.color === b.color &&
     !!a.cite === !!b.cite
@@ -58,6 +59,7 @@ function mergeStyle(a: RunStyle, b: RunStyle | undefined): RunStyle {
     size: b.size ?? a.size,
     weight: b.weight ?? a.weight,
     italic: b.italic ?? a.italic,
+    strike: b.strike ?? a.strike,
     font: b.font ?? a.font,
     color: b.color ?? a.color,
     cite: b.cite ?? a.cite,
@@ -69,6 +71,7 @@ function isEmptyStyle(s: RunStyle): boolean {
     s.size === undefined &&
     s.weight === undefined &&
     s.italic === undefined &&
+    s.strike === undefined &&
     s.font === undefined &&
     s.color === undefined &&
     !s.cite
@@ -226,6 +229,7 @@ export function Span(props: {
   size?: number | SizeToken;
   weight?: 400 | 700;
   italic?: boolean;
+  strike?: boolean;
   font?: string;
   color?: Color;
 }): SpanNode {
@@ -233,6 +237,7 @@ export function Span(props: {
   if (props.size !== undefined) style.size = props.size;
   if (props.weight !== undefined) style.weight = props.weight;
   if (props.italic !== undefined) style.italic = props.italic;
+  if (props.strike !== undefined) style.strike = props.strike;
   if (props.font !== undefined) style.font = props.font;
   if (props.color !== undefined) style.color = props.color;
   return { kind: "span", children: props.children, style };
@@ -244,6 +249,10 @@ export function Em(props: { children?: TextChildren }): SpanNode {
 
 export function Strong(props: { children?: TextChildren }): SpanNode {
   return { kind: "span", children: props.children, style: { weight: 700 } };
+}
+
+export function Strike(props: { children?: TextChildren }): SpanNode {
+  return { kind: "span", children: props.children, style: { strike: true } };
 }
 
 export function Cite(props: { children?: TextChildren }): SpanNode {

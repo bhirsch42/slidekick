@@ -203,6 +203,7 @@ function mergeStyles(role, theme, run) {
     let fontSize = base.fontSize;
     let bold = !!base.bold;
     let italic = !!base.italic;
+    let strike = false;
     let font = themeFont;
     let color = themeColor;
     if (run) {
@@ -213,6 +214,8 @@ function mergeStyles(role, theme, run) {
             bold = run.weight >= 700;
         if (run.italic !== undefined)
             italic = run.italic;
+        if (run.strike !== undefined)
+            strike = run.strike;
         if (run.font !== undefined)
             font = run.font;
         if (run.color !== undefined)
@@ -223,7 +226,7 @@ function mergeStyles(role, theme, run) {
                 color = theme.accent;
         }
     }
-    return { fontSize, bold, italic, font, color };
+    return { fontSize, bold, italic, strike, font, color };
 }
 function resolveSize(size, base) {
     if (typeof size === "number")
@@ -232,11 +235,12 @@ function resolveSize(size, base) {
     return base * factor;
 }
 function pushTextStyle(out, objectId, style, startIndex, endIndex) {
-    const fields = ["fontSize", "bold", "italic"];
+    const fields = ["fontSize", "bold", "italic", "strikethrough"];
     const textStyle = {
         fontSize: { magnitude: style.fontSize, unit: "PT" },
         bold: style.bold,
         italic: style.italic,
+        strikethrough: style.strike,
     };
     if (style.font) {
         textStyle.fontFamily = style.font;
