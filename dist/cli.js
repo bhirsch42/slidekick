@@ -2368,6 +2368,8 @@ function runStyleCss(style, role, theme) {
     parts.push(`font-weight:${style.weight}`);
   if (style.italic)
     parts.push(`font-style:italic`);
+  if (style.strike)
+    parts.push(`text-decoration:line-through`);
   if (style.font)
     parts.push(`font-family:${style.font}`);
   let color = style.color;
@@ -2702,6 +2704,8 @@ function textRunStyle(style) {
     out.bold = true;
   if (style.italic)
     out.italic = true;
+  if (style.strikethrough)
+    out.strike = true;
   if (style.fontFamily)
     out.fontFamily = style.fontFamily;
   const rgb = style.foregroundColor?.opaqueColor?.rgbColor;
@@ -2720,6 +2724,8 @@ function toRun(text, raw) {
     style.weight = 700;
   if (raw.italic)
     style.italic = true;
+  if (raw.strike)
+    style.strike = true;
   if (raw.fontFamily)
     style.font = raw.fontFamily;
   if (raw.color)
@@ -2752,6 +2758,8 @@ function filterToOverrides(style, dominant) {
     out.weight = style.weight;
   if (style.italic !== undefined && !!style.italic !== !!dominant.italic)
     out.italic = style.italic;
+  if (style.strike !== undefined && !!style.strike !== !!dominant.strike)
+    out.strike = style.strike;
   if (style.font !== undefined && style.font !== dominant.fontFamily)
     out.font = style.font;
   if (style.color !== undefined && style.color !== dominant.color)
@@ -2763,7 +2771,7 @@ function sameStyle(a, b) {
     return true;
   if (!a || !b)
     return false;
-  return a.size === b.size && a.weight === b.weight && a.italic === b.italic && a.font === b.font && a.color === b.color;
+  return a.size === b.size && a.weight === b.weight && a.italic === b.italic && a.strike === b.strike && a.font === b.font && a.color === b.color;
 }
 function classifyText(style) {
   const size = style.fontSize ?? 14;
@@ -3155,6 +3163,7 @@ function mergeStyles(role, theme, run) {
   let fontSize = base.fontSize;
   let bold = !!base.bold;
   let italic = !!base.italic;
+  let strike = false;
   let font = themeFont;
   let color = themeColor;
   if (run) {
@@ -3165,6 +3174,8 @@ function mergeStyles(role, theme, run) {
       bold = run.weight >= 700;
     if (run.italic !== undefined)
       italic = run.italic;
+    if (run.strike !== undefined)
+      strike = run.strike;
     if (run.font !== undefined)
       font = run.font;
     if (run.color !== undefined)
@@ -3175,7 +3186,7 @@ function mergeStyles(role, theme, run) {
         color = theme.accent;
     }
   }
-  return { fontSize, bold, italic, font, color };
+  return { fontSize, bold, italic, strike, font, color };
 }
 function resolveSize(size, base) {
   if (typeof size === "number")
@@ -3184,11 +3195,12 @@ function resolveSize(size, base) {
   return base * factor;
 }
 function pushTextStyle(out, objectId, style, startIndex, endIndex) {
-  const fields = ["fontSize", "bold", "italic"];
+  const fields = ["fontSize", "bold", "italic", "strikethrough"];
   const textStyle = {
     fontSize: { magnitude: style.fontSize, unit: "PT" },
     bold: style.bold,
-    italic: style.italic
+    italic: style.italic,
+    strikethrough: style.strike
   };
   if (style.font) {
     textStyle.fontFamily = style.font;

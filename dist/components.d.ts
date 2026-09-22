@@ -36,6 +36,7 @@ export declare function Span(props: {
     size?: number | SizeToken;
     weight?: 400 | 700;
     italic?: boolean;
+    strike?: boolean;
     font?: string;
     color?: Color;
 }): SpanNode;
@@ -43,6 +44,9 @@ export declare function Em(props: {
     children?: TextChildren;
 }): SpanNode;
 export declare function Strong(props: {
+    children?: TextChildren;
+}): SpanNode;
+export declare function Strike(props: {
     children?: TextChildren;
 }): SpanNode;
 export declare function Cite(props: {

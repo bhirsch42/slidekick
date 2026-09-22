@@ -1,2 +1,2 @@
-export { Bullet, Bullets, Cite, Column, Columns, Em, Heading, Image, Slide, Span, Strong, Subtitle, Text, Title, } from "./components.js";
+export { Bullet, Bullets, Cite, Column, Columns, Em, Heading, Image, Slide, Span, Strike, Strong, Subtitle, Text, Title, } from "./components.js";
 export type { Background, BulletNode, BulletsNode, Color, ColumnNode, ColumnsNode, Deck, DeckInput, DeckModule, HeadingNode, ImageCrop, ImageFit, ImageNode, InlineChild, InlineChildren, Node, ParagraphAlign, Run, RunStyle, SizeToken, SlideAlign, SlideChild, SlideNode, SpanNode, SubtitleNode, TextChildren, TextNode, TextRole, Theme, TitleNode, } from "./types.js";

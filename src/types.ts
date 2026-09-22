@@ -6,6 +6,7 @@ export interface RunStyle {
   size?: number | SizeToken;
   weight?: 400 | 700;
   italic?: boolean;
+  strike?: boolean;
   font?: string;
   color?: Color;
   cite?: boolean;

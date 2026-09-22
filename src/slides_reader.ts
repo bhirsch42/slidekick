@@ -251,6 +251,7 @@ interface RawStyle {
   fontSize?: number;
   bold?: boolean;
   italic?: boolean;
+  strike?: boolean;
   fontFamily?: string;
   color?: string;
 }
@@ -303,6 +304,7 @@ function textRunStyle(style: slides_v1.Schema$TextStyle): RawStyle {
   if (style.fontSize?.magnitude) out.fontSize = style.fontSize.magnitude;
   if (style.bold) out.bold = true;
   if (style.italic) out.italic = true;
+  if (style.strikethrough) out.strike = true;
   if (style.fontFamily) out.fontFamily = style.fontFamily;
   const rgb = style.foregroundColor?.opaqueColor?.rgbColor;
   if (rgb) {
@@ -317,6 +319,7 @@ function toRun(text: string, raw: RawStyle): Run {
   if (raw.fontSize !== undefined) style.size = raw.fontSize;
   if (raw.bold) style.weight = 700;
   if (raw.italic) style.italic = true;
+  if (raw.strike) style.strike = true;
   if (raw.fontFamily) style.font = raw.fontFamily;
   if (raw.color) style.color = raw.color;
   if (Object.keys(style).length === 0) return { text };
@@ -352,6 +355,8 @@ function filterToOverrides(
     out.weight = style.weight;
   if (style.italic !== undefined && !!style.italic !== !!dominant.italic)
     out.italic = style.italic;
+  if (style.strike !== undefined && !!style.strike !== !!dominant.strike)
+    out.strike = style.strike;
   if (style.font !== undefined && style.font !== dominant.fontFamily)
     out.font = style.font;
   if (style.color !== undefined && style.color !== dominant.color)
@@ -366,6 +371,7 @@ function sameStyle(a: RunStyle | undefined, b: RunStyle | undefined): boolean {
     a.size === b.size &&
     a.weight === b.weight &&
     a.italic === b.italic &&
+    a.strike === b.strike &&
     a.font === b.font &&
     a.color === b.color
   );

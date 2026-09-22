@@ -196,6 +196,7 @@ function runStyleCss(
   if (size !== undefined) parts.push(`font-size:${size}px`);
   if (style.weight !== undefined) parts.push(`font-weight:${style.weight}`);
   if (style.italic) parts.push(`font-style:italic`);
+  if (style.strike) parts.push(`text-decoration:line-through`);
   if (style.font) parts.push(`font-family:${style.font}`);
   let color: Color | undefined = style.color;
   if (style.cite && !color && theme.accent) color = theme.accent;
