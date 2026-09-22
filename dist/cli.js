@@ -2949,6 +2949,8 @@ function renderRuns(runs, used) {
       attrs.push(`weight={${r.style.weight}}`);
     if (r.style.italic)
       attrs.push(`italic`);
+    if (r.style.strike)
+      attrs.push(`strike`);
     if (r.style.font)
       attrs.push(`font=${JSON.stringify(r.style.font)}`);
     if (r.style.color)

@@ -563,6 +563,7 @@ function renderRuns(runs: Run[], used: Set<string>): string {
       if (r.style.weight !== undefined)
         attrs.push(`weight={${r.style.weight}}`);
       if (r.style.italic) attrs.push(`italic`);
+      if (r.style.strike) attrs.push(`strike`);
       if (r.style.font) attrs.push(`font=${JSON.stringify(r.style.font)}`);
       if (r.style.color) attrs.push(`color=${JSON.stringify(r.style.color)}`);
       return `<Span ${attrs.join(" ")}>${text}</Span>`;
