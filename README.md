@@ -77,15 +77,15 @@ Component vocabulary is fully typed: `<Title src="…">` is a compile error, `<B
 
 | Component | Purpose |
 |---|---|
-| `<Slide>` | The slide container. Children stack vertically. |
+| `<Slide background? align?>` | The slide container. Children stack vertically. `background` is a color or `{ image, scrim? }` (full-bleed, cover); `align` is `start`/`center`/`end` on the block axis. |
 | `<Columns>` / `<Column weight?>` | Horizontal split inside a slide. |
-| `<Title>` / `<Subtitle>` / `<Heading>` | Fixed-height text. |
+| `<Title>` / `<Subtitle>` / `<Heading>` | Fixed-height text. Text components take `align?`. |
 | `<Bullets>` / `<Bullet>` | Bullet list. |
 | `<Text>` | Paragraph text. |
-| `<Image src>` | Image (public HTTPS URL). |
-| `<Quote attribution?>` | Pull quote, optionally attributed. |
+| `<Image src fit? crop?>` | Image (public HTTPS URL). `fit` is `contain` (default), `cover` or `fill`. |
+| `<Em>` / `<Strong>` / `<Strike>` / `<Cite>` / `<Span>` | Inline runs inside text components. `<Span>` takes `size`, `weight`, `italic`, `strike`, `font`, `color`. |
 
-The renderer owns layout — no x/y coordinates in your deck.
+The renderer owns layout — no x/y coordinates in your deck. A deck may return `{ theme, slides }` instead of `Slide[]`; `theme` sets `background`, `text`, `accent`, `fonts` and per-role `sizes`. Projects can define their own components (for example a `PullQuote`) and use them as JSX. See `STYLE.md` for the house style.
 
 ## OAuth setup
 
